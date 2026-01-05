@@ -1,4 +1,4 @@
-package com.dcl.boot.minio.callback;
+package com.along.boot.minio.callback;
 
 import io.minio.MinioClient;
 

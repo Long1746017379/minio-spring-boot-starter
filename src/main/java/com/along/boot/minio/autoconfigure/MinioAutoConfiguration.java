@@ -1,8 +1,8 @@
-package com.dcl.boot.minio.autoconfigure;
+package com.along.boot.minio.autoconfigure;
 
-import com.dcl.boot.minio.properties.MinioProperties;
-import com.dcl.boot.minio.template.DefaultMinioTemplate;
-import com.dcl.boot.minio.template.MinioTemplate;
+import com.along.boot.minio.properties.MinioProperties;
+import com.along.boot.minio.template.DefaultMinioTemplate;
+import com.along.boot.minio.template.MinioTemplate;
 import io.minio.MinioClient;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;

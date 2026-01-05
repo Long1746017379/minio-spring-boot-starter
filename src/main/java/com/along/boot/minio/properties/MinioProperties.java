@@ -1,4 +1,4 @@
-package com.dcl.boot.minio.properties;
+package com.along.boot.minio.properties;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 

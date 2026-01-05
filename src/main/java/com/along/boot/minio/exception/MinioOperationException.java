@@ -1,4 +1,4 @@
-package com.dcl.boot.minio.exception;
+package com.along.boot.minio.exception;
 
 /**
  * MinioOperationException

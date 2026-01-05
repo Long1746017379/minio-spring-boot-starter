@@ -1,6 +1,6 @@
-package com.dcl.boot.minio.util;
+package com.along.boot.minio.util;
 
-import com.dcl.boot.minio.exception.MinioOperationException;
+import com.along.boot.minio.exception.MinioOperationException;
 import io.minio.BucketExistsArgs;
 import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;

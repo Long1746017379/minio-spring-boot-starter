@@ -1,6 +1,6 @@
-package com.dcl.boot.minio.template;
+package com.along.boot.minio.template;
 
-import com.dcl.boot.minio.callback.MinioCallback;
+import com.along.boot.minio.callback.MinioCallback;
 import io.minio.ObjectWriteResponse;
 import io.minio.messages.Bucket;
 

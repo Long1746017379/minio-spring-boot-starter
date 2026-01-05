@@ -1,8 +1,8 @@
-package com.dcl.boot.minio.template;
+package com.along.boot.minio.template;
 
-import com.dcl.boot.minio.callback.MinioCallback;
-import com.dcl.boot.minio.exception.MinioOperationException;
-import com.dcl.boot.minio.properties.MinioProperties;
+import com.along.boot.minio.callback.MinioCallback;
+import com.along.boot.minio.exception.MinioOperationException;
+import com.along.boot.minio.properties.MinioProperties;
 import io.minio.BucketExistsArgs;
 import io.minio.GetObjectArgs;
 import io.minio.GetPresignedObjectUrlArgs;

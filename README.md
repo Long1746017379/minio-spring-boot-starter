@@ -4,7 +4,45 @@
 
 参考RedisTemplate 的设计理念
 
-[GitHub-minio-spring-boot-starter](https://github.com/Long1746017379/minio-spring-boot-starter)
+[GitHub](https://github.com/Long1746017379/minio-spring-boot-starter)
+
+[Gitee](https://gitee.com/chenglong1027/minio-spring-boot-starter)
+
+**代码结构**
+
+```
+minio-spring-boot-starter
+│
+├── pom.xml
+│
+└── src/main/java
+│   └── com/along/boot/minio
+│       ├── autoconfigure
+│       │   └── MinioAutoConfiguration.java
+|		|
+│       ├── callback
+│       │   └── MinioCallback.java
+│       │
+│       ├── exception
+│       │   └── MinioOperationException.java
+│       │
+│       ├── properties
+│       │   └── MinioProperties.java
+│       │
+│       ├── template
+│       │   └── DefaultMinioTemplate.java
+│       │   └── MinioTemplate.java
+|		|
+│       └── util
+│           └── MinioBucketManager.java
+│
+└── src/main/resources
+    └── META-INF
+        └── spring.factories
+
+```
+
+
 
 ## 引入starter
 

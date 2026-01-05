@@ -6,8 +6,9 @@
 
 [GitHub-minio-spring-boot-starter](https://github.com/Long1746017379/minio-spring-boot-starter)
 
-
 ## 引入starter
+
+> pom.xml 中引入starter 依赖
 
 ```xml
 <dependency>
@@ -30,5 +31,5 @@ minio.bucket = default
 
 ## 业务层使用
 
-> 业务层使用当前目录下 MinioUtil 即可
+> 业务层使用当前目录下 ./other-import/MinioUtil 即可
 

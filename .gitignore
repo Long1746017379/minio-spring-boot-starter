@@ -1,0 +1,68 @@
+############################
+# Java
+############################
+*.class
+*.jar
+*.war
+*.ear
+*.log
+
+############################
+# Maven
+############################
+/target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+
+############################
+# Gradle
+############################
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+############################
+# IntelliJ IDEA
+############################
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+############################
+# Eclipse
+############################
+.project
+.classpath
+.settings/
+.factorypath
+
+############################
+# VS Code
+############################
+.vscode/
+
+############################
+# OS
+############################
+.DS_Store
+Thumbs.db
+
+############################
+# Logs
+############################
+logs/
+
+############################
+# Temporary files
+############################
+*.tmp
+*.temp
+*.swp
+*~

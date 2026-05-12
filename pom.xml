@@ -15,6 +15,7 @@
         <maven.compiler.target>8</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <spring.boot.version>2.2.13.RELEASE</spring.boot.version>
+        <okhttp.version>4.12.0</okhttp.version>
     </properties>
 
     <dependencyManagement>
@@ -26,15 +27,36 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <!-- OkHttp 版本锁定，解决与 MinIO SDK 的兼容性问题 -->
+            <dependency>
+                <groupId>com.squareup.okhttp3</groupId>
+                <artifactId>okhttp</artifactId>
+                <version>${okhttp.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.squareup.okhttp3</groupId>
+                <artifactId>okhttp-urlconnection</artifactId>
+                <version>${okhttp.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
     <dependencies>
+        <!-- 1. Lombok：通过 @Slf4j 注解自动生成日志对象，编译时需要，运行时不需要 -->
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
+            <version>1.18.36</version>
+            <!-- 表示只在编译时使用 -->
             <scope>provided</scope>
         </dependency>
+        <!-- Logback 日志实现 -->
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>1.2.11</version>
+        </dependency>
+
         <!-- Spring Boot 自动配置 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -51,7 +73,7 @@
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
         </dependency>
-        <!-- MinIO SDK -->
+        <!-- MinIO SDK (自带 OkHttp 4.x) -->
         <dependency>
             <groupId>io.minio</groupId>
             <artifactId>minio</artifactId>

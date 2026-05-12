@@ -1,5 +1,6 @@
 package com.along.boot.minio.template;
 
+import com.along.boot.minio.autoconfigure.MinioAutoConfiguration;
 import com.along.boot.minio.callback.MinioCallback;
 import com.along.boot.minio.exception.MinioOperationException;
 import com.along.boot.minio.properties.MinioProperties;
@@ -14,9 +15,14 @@ import io.minio.PutObjectArgs;
 import io.minio.RemoveBucketArgs;
 import io.minio.RemoveObjectArgs;
 import io.minio.Result;
+import io.minio.StatObjectArgs;
+import io.minio.StatObjectResponse;
 import io.minio.http.Method;
 import io.minio.messages.Bucket;
 import io.minio.messages.Item;
+import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
@@ -30,6 +36,7 @@ import java.util.Optional;
  */
 public class DefaultMinioTemplate implements MinioTemplate {
 
+    private static final Logger logger = LoggerFactory.getLogger(DefaultMinioTemplate.class);
     private final MinioClient minioClient;
     private final MinioProperties properties;
 
@@ -86,6 +93,7 @@ public class DefaultMinioTemplate implements MinioTemplate {
     public void upload(String bucketName, String objectName,
                        InputStream stream, String contentType) {
         try {
+            logger.info("Uploading object: bucket={}, object={}", bucketName, objectName);
             minioClient.putObject(
                     PutObjectArgs.builder()
                             .bucket(bucketName)
@@ -94,7 +102,9 @@ public class DefaultMinioTemplate implements MinioTemplate {
                             .contentType(contentType)
                             .build()
             );
+            logger.info("Upload completed: bucket={}, object={}", bucketName, objectName);
         } catch (Exception e) {
+            logger.error("Upload failed: bucket={}, object={}", bucketName, objectName, e);
             throw new MinioOperationException("Upload failed: " + objectName, e);
         }
     }
@@ -145,7 +155,12 @@ public class DefaultMinioTemplate implements MinioTemplate {
     @Override
     public Optional<Bucket> getBucket(String bucketName) {
         try {
-            return getAllBuckets().stream().filter(b -> b.name().equals(bucketName)).findFirst();
+            if (!bucketExists(bucketName)) {
+                return Optional.empty();
+            }
+            return minioClient.listBuckets().stream()
+                    .filter(b -> b.name().equals(bucketName))
+                    .findFirst();
         } catch (Exception e) {
             throw new MinioOperationException("getBucket: " + bucketName, e);
         }
@@ -224,6 +239,16 @@ public class DefaultMinioTemplate implements MinioTemplate {
             );
         } catch (Exception e) {
             throw new MinioOperationException("Get object url failed", e);
+        }
+    }
+
+    @Override
+    public StatObjectResponse getObjectInfo(String bucketName, String objectName) {
+        try {
+            return minioClient.statObject(
+                    StatObjectArgs.builder().bucket(bucketName).object(objectName).build());
+        } catch (Exception e) {
+            throw new MinioOperationException("Get object info failed: " + objectName, e);
         }
     }
 

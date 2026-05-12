@@ -2,6 +2,7 @@ package com.along.boot.minio.template;
 
 import com.along.boot.minio.callback.MinioCallback;
 import io.minio.ObjectWriteResponse;
+import io.minio.StatObjectResponse;
 import io.minio.messages.Bucket;
 
 import java.io.InputStream;
@@ -39,6 +40,8 @@ public interface MinioTemplate {
     List<String> listObjects(String bucketName);
 
     String getObjectUrl(String bucketName, String objectName);
+
+    StatObjectResponse getObjectInfo(String bucketName, String objectName);
 
     String getObjectUrl(String bucketName, String objectName, Integer expirySeconds);
 

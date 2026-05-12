@@ -1,11 +1,13 @@
 package com.along.boot.minio.properties;
 
+import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
  * @author along
  * @date 2025/12/22 22:36
  */
+@Data
 @ConfigurationProperties(prefix = "minio")
 public class MinioProperties {
     /**
@@ -33,44 +35,27 @@ public class MinioProperties {
      */
     private String bucket = "default";
 
+    /**
+     * SSL 支持
+     */
+    private boolean secure = false;
+    /**
+     * 连接超时（毫秒）
+     */
+    private int connectTimeout = 10000;
 
-    public boolean isEnabled() {
-        return enabled;
-    }
+    /**
+     * 读取超时（毫秒）
+     */
+    private int readTimeout = 30000;
+    /**
+     * 写入超时（毫秒）
+     */
+    private int writeTimeout = 30000;
 
-    public void setEnabled(boolean enabled) {
-        this.enabled = enabled;
-    }
+    /**
+     * 调用超时（毫秒）
+     */
+    private int callTimeout = 60000;
 
-    public String getEndpoint() {
-        return endpoint;
-    }
-
-    public void setEndpoint(String endpoint) {
-        this.endpoint = endpoint;
-    }
-
-    public String getAccessKey() {
-        return accessKey;
-    }
-
-    public void setAccessKey(String accessKey) {
-        this.accessKey = accessKey;
-    }
-
-    public String getSecretKey() {
-        return secretKey;
-    }
-
-    public void setSecretKey(String secretKey) {
-        this.secretKey = secretKey;
-    }
-
-    public String getBucket() {
-        return bucket;
-    }
-
-    public void setBucket(String bucket) {
-        this.bucket = bucket;
-    }
 }

@@ -4,7 +4,6 @@ import com.along.boot.minio.properties.MinioProperties;
 import com.along.boot.minio.template.DefaultMinioTemplate;
 import com.along.boot.minio.template.MinioTemplate;
 import io.minio.MinioClient;
-import okhttp3.OkHttpClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -13,8 +12,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-
-import java.util.concurrent.TimeUnit;
 
 /**
  * @author along
@@ -32,24 +29,6 @@ import java.util.concurrent.TimeUnit;
 public class MinioAutoConfiguration {
 
     private static final Logger logger = LoggerFactory.getLogger(MinioAutoConfiguration.class);
-
-//    @Bean
-//    @ConditionalOnMissingBean
-//    public MinioClient minioClient(MinioProperties props) {
-//        // 创建自定义 OkHttpClient 配置超时
-//        OkHttpClient httpClient = new OkHttpClient.Builder()
-//                .connectTimeout(props.getConnectTimeout(), TimeUnit.MILLISECONDS)
-//                .readTimeout(props.getReadTimeout(), TimeUnit.MILLISECONDS)
-//                .writeTimeout(props.getWriteTimeout(), TimeUnit.MILLISECONDS)
-//                .callTimeout(props.getCallTimeout(), TimeUnit.MILLISECONDS)
-//                .build();
-//
-//        return MinioClient.builder()
-//                .endpoint(props.getEndpoint())
-//                .credentials(props.getAccessKey(), props.getSecretKey())
-//                .httpClient(httpClient)
-//                .build();
-//    }
 
     @Bean
     @ConditionalOnMissingBean

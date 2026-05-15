@@ -6,10 +6,10 @@ import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 
 /**
- * MinioBucketManager
+ * Bucket 管理器，提供 Bucket 的兜底创建能力。
+ * <p>用于系统启动时确保默认 Bucket 存在，避免首次使用时因 Bucket 不存在而报错。</p>
  *
  * @author along
- * @date 2025/12/22 23:35
  */
 public class MinioBucketManager {
 
@@ -19,6 +19,12 @@ public class MinioBucketManager {
         this.client = client;
     }
 
+    /**
+     * 如果 Bucket 不存在则创建。
+     *
+     * @param bucket Bucket 名称
+     * @throws MinioOperationException 创建失败时抛出
+     */
     public void createIfAbsent(String bucket) {
         try {
             boolean exists = client.bucketExists(
@@ -33,4 +39,5 @@ public class MinioBucketManager {
             throw new MinioOperationException("Create bucket failed: " + bucket, e);
         }
     }
+
 }

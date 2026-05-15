@@ -69,5 +69,14 @@ minio.bucket = default
 
 ## 业务层使用
 
-> 业务层使用当前目录下 ./other-import/MinioUtil 即可
+> 注入 `MinioTemplate` 或 `MinioUtil` 即可使用。
+
+```java
+@Autowired
+private MinioUtil minioUtil;
+
+// 或
+@Autowired
+private MinioTemplate minioTemplate;
+```
 

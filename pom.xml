@@ -82,6 +82,12 @@
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
         </dependency>
+        <!-- Spring Web (optional, MultipartFile 支持) -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-web</artifactId>
+            <optional>true</optional>
+        </dependency>
         <!-- MinIO SDK (自带 OkHttp 4.x) -->
         <dependency>
             <groupId>io.minio</groupId>

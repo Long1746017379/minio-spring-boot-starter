@@ -4,58 +4,43 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
+ * MinIO 客户端配置属性。
+ * <p>在 {@code application.properties} 或 {@code application.yml} 中以 {@code minio.*} 前缀配置。</p>
+ *
  * @author along
- * @date 2025/12/22 22:36
  */
 @Data
 @ConfigurationProperties(prefix = "minio")
 public class MinioProperties {
-    /**
-     * 是否启用 MinIO
-     */
+
+    /** 是否启用 MinIO 自动配置 */
     private boolean enabled = true;
 
-    /**
-     * MinIO 服务地址
-     */
+    /** MinIO 服务端点地址 */
     private String endpoint = "http://192.168.253.100:19000";
 
-    /**
-     * 访问 key
-     */
+    /** 访问密钥 */
     private String accessKey = "minioadmin";
 
-    /**
-     * 密钥
-     */
+    /** 密钥 */
     private String secretKey = "minioadmin";
 
-    /**
-     * 默认桶
-     */
+    /** 默认存储桶名称 */
     private String bucket = "default";
 
-    /**
-     * SSL 支持
-     */
+    /** 是否启用 SSL/TLS */
     private boolean secure = false;
-    /**
-     * 连接超时（毫秒）
-     */
+
+    /** 连接超时时间（毫秒） */
     private int connectTimeout = 10000;
 
-    /**
-     * 读取超时（毫秒）
-     */
+    /** 读取超时时间（毫秒） */
     private int readTimeout = 30000;
-    /**
-     * 写入超时（毫秒）
-     */
+
+    /** 写入超时时间（毫秒） */
     private int writeTimeout = 30000;
 
-    /**
-     * 调用超时（毫秒）
-     */
+    /** 调用超时时间（毫秒） */
     private int callTimeout = 60000;
 
 }

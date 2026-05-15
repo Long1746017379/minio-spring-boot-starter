@@ -3,6 +3,8 @@ package com.along.boot.minio.autoconfigure;
 import com.along.boot.minio.properties.MinioProperties;
 import com.along.boot.minio.template.DefaultMinioTemplate;
 import com.along.boot.minio.template.MinioTemplate;
+import com.along.boot.minio.util.MinioBucketManager;
+import com.along.boot.minio.util.MinioUtil;
 import io.minio.MinioClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,8 +16,15 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
+ * MinIO 自动配置。
+ * <p>当 classpath 中存在 {@link MinioClient} 且配置项 {@code minio.enabled=true}（默认）时生效。</p>
+ * <ul>
+ *   <li>自动创建 {@link MinioClient} 实例</li>
+ *   <li>自动创建 {@link MinioBucketManager} 并兜底创建默认 Bucket</li>
+ *   <li>自动注册 {@link MinioTemplate} 和 {@link MinioUtil}</li>
+ * </ul>
+ *
  * @author along
- * @date 2025/12/22 22:42
  */
 @Configuration
 @EnableConfigurationProperties(MinioProperties.class)
@@ -30,6 +39,12 @@ public class MinioAutoConfiguration {
 
     private static final Logger logger = LoggerFactory.getLogger(MinioAutoConfiguration.class);
 
+    /**
+     * 创建 MinIO 客户端。
+     *
+     * @param props MinIO 配置属性
+     * @return MinioClient 实例
+     */
     @Bean
     @ConditionalOnMissingBean
     public MinioClient minioClient(MinioProperties props) {
@@ -42,10 +57,44 @@ public class MinioAutoConfiguration {
         return minioClient;
     }
 
+    /**
+     * 创建 Bucket 管理器，用于兜底创建默认 Bucket。
+     *
+     * @param minioClient MinIO 客户端
+     * @return MinioBucketManager 实例
+     */
     @Bean
     @ConditionalOnMissingBean
-    public MinioTemplate minioTemplate(MinioClient minioClient, MinioProperties props) {
+    public MinioBucketManager minioBucketManager(MinioClient minioClient) {
+        return new MinioBucketManager(minioClient);
+    }
+
+    /**
+     * 创建 MinIO 操作模板，创建时自动确保默认 Bucket 存在。
+     *
+     * @param minioClient   MinIO 客户端
+     * @param props         MinIO 配置属性
+     * @param bucketManager Bucket 管理器
+     * @return MinioTemplate 实例
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public MinioTemplate minioTemplate(MinioClient minioClient, MinioProperties props,
+                                       MinioBucketManager bucketManager) {
+        bucketManager.createIfAbsent(props.getBucket());
         return new DefaultMinioTemplate(minioClient, props);
+    }
+
+    /**
+     * 创建 MinIO 工具类。
+     *
+     * @param minioTemplate MinIO 操作模板
+     * @return MinioUtil 实例
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public MinioUtil minioUtil(MinioTemplate minioTemplate) {
+        return new MinioUtil(minioTemplate);
     }
 
 }

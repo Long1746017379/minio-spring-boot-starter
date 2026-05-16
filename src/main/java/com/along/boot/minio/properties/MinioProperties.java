@@ -43,4 +43,7 @@ public class MinioProperties {
     /** 调用超时时间（毫秒） */
     private int callTimeout = 60000;
 
+    /** MinIO 服务区域（用于 multipart upload 等操作） */
+    private String region = "us-east-1";
+
 }

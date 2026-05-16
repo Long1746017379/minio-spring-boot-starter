@@ -4,6 +4,8 @@ import com.along.boot.minio.callback.MinioCallback;
 import com.along.boot.minio.callback.ProgressListener;
 import com.along.boot.minio.exception.MinioOperationException;
 import com.along.boot.minio.properties.MinioProperties;
+import com.along.boot.minio.util.MinioHashUtil;
+import com.along.boot.minio.util.S3MultipartClient;
 import io.minio.BucketExistsArgs;
 import io.minio.CopyObjectArgs;
 import io.minio.CopySource;
@@ -22,20 +24,28 @@ import io.minio.Result;
 import io.minio.SetBucketPolicyArgs;
 import io.minio.StatObjectArgs;
 import io.minio.StatObjectResponse;
+import io.minio.UploadPartResponse;
 import io.minio.http.Method;
 import io.minio.messages.Bucket;
 import io.minio.messages.DeleteError;
 import io.minio.messages.DeleteObject;
 import io.minio.messages.Item;
+import io.minio.messages.Part;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -48,13 +58,19 @@ public class DefaultMinioTemplate implements MinioTemplate {
 
     private static final Logger logger = LoggerFactory.getLogger(DefaultMinioTemplate.class);
 
+    private static final String HASH_PREFIX = ".__minio_hash/";
+
     private final MinioClient minioClient;
+
+    private final S3MultipartClient multipartClient;
 
     private final MinioProperties properties;
 
-    public DefaultMinioTemplate(MinioClient minioClient, MinioProperties properties) {
+    public DefaultMinioTemplate(MinioClient minioClient, MinioProperties properties,
+                                S3MultipartClient multipartClient) {
         this.minioClient = minioClient;
         this.properties = properties;
+        this.multipartClient = multipartClient;
     }
 
     // ===================== Bucket 操作 =====================
@@ -391,6 +407,257 @@ public class DefaultMinioTemplate implements MinioTemplate {
         } catch (Exception e) {
             throw new MinioOperationException("Minio execute failed", e);
         }
+    }
+
+    // ===================== 分片上传（断点续传） =====================
+
+    @Override
+    public String initiateMultipartUpload(String bucketName, String objectName) {
+        try {
+            return multipartClient.initiateMultipartUpload(bucketName, objectName);
+        } catch (Exception e) {
+            throw new MinioOperationException("Initiate multipart upload failed: " + objectName, e);
+        }
+    }
+
+    @Override
+    public UploadPartResponse uploadPart(String bucketName, String objectName, String uploadId,
+                                         int partNumber, InputStream stream, long partSize) {
+        try {
+            byte[] data = toByteArray(stream);
+            return multipartClient.uploadPart(
+                    bucketName, objectName, uploadId, partNumber, data);
+        } catch (Exception e) {
+            throw new MinioOperationException("Upload part failed: " + objectName
+                    + ", part=" + partNumber, e);
+        }
+    }
+
+    @Override
+    public List<Part> listParts(String bucketName, String objectName, String uploadId) {
+        try {
+            return multipartClient.listParts(bucketName, objectName, uploadId);
+        } catch (Exception e) {
+            throw new MinioOperationException("List parts failed: " + objectName
+                    + ", uploadId=" + uploadId, e);
+        }
+    }
+
+    @Override
+    public ObjectWriteResponse completeMultipartUpload(String bucketName, String objectName,
+                                                       String uploadId, Part[] parts) {
+        try {
+            return multipartClient.completeMultipartUpload(
+                    bucketName, objectName, uploadId, parts);
+        } catch (Exception e) {
+            throw new MinioOperationException("Complete multipart upload failed: " + objectName, e);
+        }
+    }
+
+    @Override
+    public void abortMultipartUpload(String bucketName, String objectName, String uploadId) {
+        try {
+            multipartClient.abortMultipartUpload(bucketName, objectName, uploadId);
+        } catch (Exception e) {
+            throw new MinioOperationException("Abort multipart upload failed: " + objectName, e);
+        }
+    }
+
+    @Override
+    public ObjectWriteResponse resumeUpload(String bucketName, String objectName,
+                                            InputStream stream, long objectSize, int partSize,
+                                            String uploadId) {
+        try {
+            String effectiveUploadId = uploadId != null
+                    ? uploadId
+                    : initiateMultipartUpload(bucketName, objectName);
+
+            List<Part> existingParts = listParts(bucketName, objectName, effectiveUploadId);
+            Set<Integer> uploadedPartNumbers = new HashSet<>();
+            List<Part> allParts = new ArrayList<>();
+            for (Part part : existingParts) {
+                uploadedPartNumbers.add(part.partNumber());
+                allParts.add(part);
+            }
+
+            int partCount = (int) Math.ceil((double) objectSize / partSize);
+            byte[] buffer = new byte[partSize];
+
+            for (int partNumber = 1; partNumber <= partCount; partNumber++) {
+                long currentPartSize = Math.min(partSize,
+                        objectSize - (long) (partNumber - 1) * partSize);
+                int bytesRead = readFully(stream, buffer, (int) currentPartSize);
+
+                if (uploadedPartNumbers.contains(partNumber)) {
+                    continue;
+                }
+
+                UploadPartResponse response = multipartClient.uploadPart(
+                        bucketName, objectName, effectiveUploadId, partNumber,
+                        copyOf(buffer, bytesRead));
+                allParts.add(new Part(partNumber, response.etag()));
+            }
+
+            allParts.sort(Comparator.comparingInt(Part::partNumber));
+            return completeMultipartUpload(bucketName, objectName, effectiveUploadId,
+                    allParts.toArray(new Part[0]));
+        } catch (Exception e) {
+            throw new MinioOperationException("Resume upload failed: " + objectName, e);
+        }
+    }
+
+    // ===================== 秒传（内容哈希） =====================
+
+    @Override
+    public boolean isContentHashExist(String bucketName, String hash) {
+        return isObjectExist(bucketName, HASH_PREFIX + hash);
+    }
+
+    @Override
+    public void createContentHashMarker(String bucketName, String hash, String sourceObject) {
+        try {
+            Map<String, String> userMetadata = new HashMap<>();
+            userMetadata.put("content-hash", hash);
+            userMetadata.put("source-object", sourceObject);
+
+            minioClient.putObject(
+                    PutObjectArgs.builder()
+                            .bucket(bucketName)
+                            .object(HASH_PREFIX + hash)
+                            .stream(new ByteArrayInputStream(new byte[0]), 0, -1)
+                            .userMetadata(userMetadata)
+                            .build()
+            );
+        } catch (Exception e) {
+            throw new MinioOperationException("Create content hash marker failed: " + hash, e);
+        }
+    }
+
+    @Override
+    public Optional<String> getContentHashSource(String bucketName, String hash) {
+        try {
+            StatObjectResponse stat = minioClient.statObject(
+                    StatObjectArgs.builder()
+                            .bucket(bucketName)
+                            .object(HASH_PREFIX + hash)
+                            .build()
+            );
+            Map<String, String> metadata = stat.userMetadata();
+            if (metadata != null) {
+                String source = metadata.get("source-object");
+                if (source != null && !source.isEmpty()) {
+                    return Optional.of(source);
+                }
+            }
+            return Optional.empty();
+        } catch (Exception e) {
+            return Optional.empty();
+        }
+    }
+
+    @Override
+    public ObjectWriteResponse uploadWithInstantUpload(String bucketName, String objectName,
+                                                       InputStream stream, String contentType,
+                                                       ProgressListener progressListener) {
+        try {
+            byte[] fileBytes = toByteArray(stream);
+            String hash = MinioHashUtil.computeMD5(fileBytes);
+
+            Optional<String> sourceOpt = getContentHashSource(bucketName, hash);
+            if (sourceOpt.isPresent()) {
+                logger.info("Instant upload detected (content hash match): bucket={}, object={}",
+                        bucketName, objectName);
+                return copyFile(bucketName, sourceOpt.get(), bucketName, objectName);
+            }
+
+            Map<String, String> userMetadata = new HashMap<>();
+            userMetadata.put("content-hash", hash);
+
+            InputStream uploadStream = new ByteArrayInputStream(fileBytes);
+            if (progressListener != null) {
+                uploadStream = new ProgressInputStream(uploadStream, progressListener, fileBytes.length);
+            }
+
+            ObjectWriteResponse response = minioClient.putObject(
+                    PutObjectArgs.builder()
+                            .bucket(bucketName)
+                            .object(objectName)
+                            .stream(uploadStream, fileBytes.length,
+                                    Math.min(fileBytes.length, 10 * 1024 * 1024))
+                            .contentType(contentType)
+                            .userMetadata(userMetadata)
+                            .build()
+            );
+
+            createContentHashMarker(bucketName, hash, objectName);
+            return response;
+        } catch (Exception e) {
+            throw new MinioOperationException("Upload with instant upload failed: " + objectName, e);
+        }
+    }
+
+    @Override
+    public ObjectWriteResponse uploadWithHash(String bucketName, String objectName,
+                                              InputStream stream, String contentType) {
+        try {
+            byte[] fileBytes = toByteArray(stream);
+            String hash = MinioHashUtil.computeMD5(fileBytes);
+
+            Map<String, String> userMetadata = new HashMap<>();
+            userMetadata.put("content-hash", hash);
+
+            return minioClient.putObject(
+                    PutObjectArgs.builder()
+                            .bucket(bucketName)
+                            .object(objectName)
+                            .stream(new ByteArrayInputStream(fileBytes), fileBytes.length,
+                                    Math.min(fileBytes.length, 10 * 1024 * 1024))
+                            .contentType(contentType)
+                            .userMetadata(userMetadata)
+                            .build()
+            );
+        } catch (Exception e) {
+            throw new MinioOperationException("Upload with hash failed: " + objectName, e);
+        }
+    }
+
+    // ===================== Helper Methods =====================
+
+    /**
+     * 将输入流完整读取为字节数组。
+     */
+    private byte[] toByteArray(InputStream stream) throws IOException {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        byte[] data = new byte[8192];
+        int n;
+        while ((n = stream.read(data, 0, data.length)) != -1) {
+            buffer.write(data, 0, n);
+        }
+        return buffer.toByteArray();
+    }
+
+    /**
+     * 从输入流中精确读取指定长度的字节。
+     */
+    private int readFully(InputStream in, byte[] buffer, int length) throws IOException {
+        int totalRead = 0;
+        while (totalRead < length) {
+            int read = in.read(buffer, totalRead, length - totalRead);
+            if (read == -1) {
+                break;
+            }
+            totalRead += read;
+        }
+        return totalRead;
+    }
+
+    /**
+     * 复制字节数组的前 length 个字节。
+     */
+    private byte[] copyOf(byte[] original, int length) {
+        byte[] copy = new byte[length];
+        System.arraycopy(original, 0, copy, 0, length);
+        return copy;
     }
 
     /**

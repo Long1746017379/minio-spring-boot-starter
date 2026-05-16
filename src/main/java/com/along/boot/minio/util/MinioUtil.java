@@ -10,6 +10,7 @@ import io.minio.StatObjectArgs;
 import io.minio.errors.ErrorResponseException;
 import io.minio.messages.Bucket;
 import io.minio.messages.Item;
+import io.minio.messages.Part;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.multipart.MultipartFile;
@@ -412,6 +413,125 @@ public class MinioUtil {
      */
     public List<String> getObjectUrls(String bucketName, List<String> objectNames, Integer expirySeconds) {
         return minioTemplate.getObjectUrls(bucketName, objectNames, expirySeconds);
+    }
+
+    // ===================== 秒传（内容哈希） =====================
+
+    /**
+     * 秒传上传文件：自动计算 MD5 哈希判断是否为重复文件。
+     * <p>若文件内容已存在，通过服务器端复制实现瞬时完成。</p>
+     *
+     * @param bucket     Bucket 名称
+     * @param objectName 对象名
+     * @param file       Spring MultipartFile
+     * @return 文件外链
+     */
+    public String instantUpload(String bucket, String objectName, MultipartFile file) {
+        try (InputStream inputStream = file.getInputStream()) {
+            ObjectWriteResponse response = minioTemplate.uploadWithInstantUpload(
+                    bucket, objectName, inputStream, file.getContentType(), null);
+            return buildObjectUrl(bucket, objectName);
+        } catch (IOException e) {
+            throw new RuntimeException("Instant upload failed", e);
+        }
+    }
+
+    /**
+     * 秒传上传文件（带进度监听）。
+     *
+     * @param bucket           Bucket 名称
+     * @param objectName       对象名
+     * @param file             Spring MultipartFile
+     * @param progressListener 进度监听器
+     * @return 文件外链
+     */
+    public String instantUpload(String bucket, String objectName, MultipartFile file,
+                                 ProgressListener progressListener) {
+        try (InputStream inputStream = file.getInputStream()) {
+            ObjectWriteResponse response = minioTemplate.uploadWithInstantUpload(
+                    bucket, objectName, inputStream, file.getContentType(), progressListener);
+            return buildObjectUrl(bucket, objectName);
+        } catch (IOException e) {
+            throw new RuntimeException("Instant upload failed", e);
+        }
+    }
+
+    /**
+     * 判断文件内容是否已存在（秒传判断）。
+     *
+     * @param bucket Bucket 名称
+     * @param hash   MD5 内容哈希值
+     * @return true 表示相同内容的文件已存在
+     */
+    public boolean isContentDuplicate(String bucket, String hash) {
+        return minioTemplate.isContentHashExist(bucket, hash);
+    }
+
+    /**
+     * 计算文件内容的 MD5 哈希值。
+     *
+     * @param stream 输入流
+     * @return MD5 十六进制小写字符串
+     */
+    public String computeMD5(InputStream stream) {
+        return MinioHashUtil.computeMD5(stream);
+    }
+
+    // ===================== 分片上传（断点续传） =====================
+
+    /**
+     * 断点续传上传文件。
+     *
+     * @param bucket     Bucket 名称
+     * @param objectName 对象名
+     * @param file       Spring MultipartFile
+     * @param partSize   分片大小（字节），建议 5MB ~ 50MB
+     * @param uploadId   续传的 uploadId（首次上传传 null）
+     * @return 文件外链
+     */
+    public String resumeUpload(String bucket, String objectName,
+                                MultipartFile file, int partSize, String uploadId) {
+        try (InputStream inputStream = file.getInputStream()) {
+            ObjectWriteResponse response = minioTemplate.resumeUpload(
+                    bucket, objectName, inputStream, file.getSize(), partSize, uploadId);
+            return buildObjectUrl(bucket, objectName);
+        } catch (IOException e) {
+            throw new RuntimeException("Resume upload failed", e);
+        }
+    }
+
+    /**
+     * 初始化分片上传。
+     *
+     * @param bucket     Bucket 名称
+     * @param objectName 对象名
+     * @return uploadId
+     */
+    public String initiateMultipartUpload(String bucket, String objectName) {
+        return minioTemplate.initiateMultipartUpload(bucket, objectName);
+    }
+
+    /**
+     * 列举已上传的分片。
+     *
+     * @param bucket     Bucket 名称
+     * @param objectName 对象名
+     * @param uploadId   分片上传 ID
+     * @return 分片列表
+     */
+    public List<Part> listParts(String bucket, String objectName, String uploadId) {
+        return minioTemplate.listParts(bucket, objectName, uploadId);
+    }
+
+    /**
+     * 取消分片上传。
+     *
+     * @param bucket     Bucket 名称
+     * @param objectName 对象名
+     * @param uploadId   分片上传 ID
+     */
+    public void abortMultipartUpload(String bucket, String objectName, String uploadId) {
+        minioTemplate.abortMultipartUpload(bucket, objectName, uploadId);
     }
 
     // ===================== 工具 =====================

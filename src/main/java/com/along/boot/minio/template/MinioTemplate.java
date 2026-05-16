@@ -2,9 +2,12 @@ package com.along.boot.minio.template;
 
 import com.along.boot.minio.callback.MinioCallback;
 import com.along.boot.minio.callback.ProgressListener;
+import com.along.boot.minio.callback.ProgressListener;
 import io.minio.ObjectWriteResponse;
 import io.minio.StatObjectResponse;
+import io.minio.UploadPartResponse;
 import io.minio.messages.Bucket;
+import io.minio.messages.Part;
 
 import java.io.InputStream;
 import java.util.List;
@@ -224,6 +227,141 @@ public interface MinioTemplate {
      * @param policy     策略 JSON 字符串
      */
     void setBucketPolicy(String bucketName, String policy);
+
+    // ===================== 分片上传（断点续传） =====================
+
+    /**
+     * 初始化分片上传。
+     *
+     * @param bucketName Bucket 名称
+     * @param objectName 对象名
+     * @return uploadId 分片上传唯一标识
+     */
+    String initiateMultipartUpload(String bucketName, String objectName);
+
+    /**
+     * 上传单个分片。
+     *
+     * @param bucketName Bucket 名称
+     * @param objectName 对象名
+     * @param uploadId   分片上传 ID
+     * @param partNumber 分片编号（从 1 开始）
+     * @param stream     分片数据流
+     * @param partSize   分片大小（字节）
+     * @return UploadPartResponse
+     */
+    UploadPartResponse uploadPart(String bucketName, String objectName, String uploadId,
+                                  int partNumber, InputStream stream, long partSize);
+
+    /**
+     * 列举已上传的分片列表。
+     *
+     * @param bucketName Bucket 名称
+     * @param objectName 对象名
+     * @param uploadId   分片上传 ID
+     * @return 已上传的分片列表
+     */
+    List<Part> listParts(String bucketName, String objectName, String uploadId);
+
+    /**
+     * 完成分片上传，合并所有分片。
+     *
+     * @param bucketName Bucket 名称
+     * @param objectName 对象名
+     * @param uploadId   分片上传 ID
+     * @param parts      所有分片信息（partNumber + etag）
+     * @return 写入响应
+     */
+    ObjectWriteResponse completeMultipartUpload(String bucketName, String objectName,
+                                                String uploadId, Part[] parts);
+
+    /**
+     * 取消分片上传。
+     *
+     * @param bucketName Bucket 名称
+     * @param objectName 对象名
+     * @param uploadId   分片上传 ID
+     */
+    void abortMultipartUpload(String bucketName, String objectName, String uploadId);
+
+    /**
+     * 断点续传高阶接口：自动跳过已上传的分片，仅上传缺失分片。
+     * <p>如果 uploadId 为 null，则新建分片上传；否则沿用已有 uploadId 继续上传。</p>
+     *
+     * @param bucketName Bucket 名称
+     * @param objectName 对象名
+     * @param stream     文件输入流
+     * @param objectSize 文件总大小（必须已知）
+     * @param partSize   分片大小（字节），建议 5MB ~ 50MB
+     * @param uploadId   null 则新建，非 null 则继续该 uploadId
+     * @return 写入响应
+     */
+    ObjectWriteResponse resumeUpload(String bucketName, String objectName,
+                                     InputStream stream, long objectSize, int partSize,
+                                     String uploadId);
+
+    // ===================== 秒传（内容哈希） =====================
+
+    /**
+     * 判断指定内容哈希是否已存在。
+     *
+     * @param bucketName Bucket 名称
+     * @param hash       MD5 内容哈希值（32 位十六进制小写）
+     * @return true 表示相同内容的文件已存在
+     */
+    boolean isContentHashExist(String bucketName, String hash);
+
+    /**
+     * 创建内容哈希标记对象。
+     * <p>在特殊前缀路径下创建标记对象，用于后续的 O(1) 秒传判断。</p>
+     *
+     * @param bucketName   Bucket 名称
+     * @param hash         MD5 内容哈希值
+     * @param sourceObject 源对象路径
+     */
+    void createContentHashMarker(String bucketName, String hash, String sourceObject);
+
+    /**
+     * 获取哈希标记对象中记录的源对象路径。
+     *
+     * @param bucketName Bucket 名称
+     * @param hash       MD5 内容哈希值
+     * @return 源对象路径，若不存在则返回 empty
+     */
+    Optional<String> getContentHashSource(String bucketName, String hash);
+
+    /**
+     * 上传文件并启用秒传能力。
+     * <p>自动计算 MD5 哈希，判断内容是否已存在：
+     * <ul>
+     *   <li>若已存在：通过服务器端复制实现瞬间上传</li>
+     *   <li>若不存在：正常上传并创建哈希标记</li>
+     * </ul>
+     * </p>
+     *
+     * @param bucketName       Bucket 名称
+     * @param objectName       对象名
+     * @param stream           文件流
+     * @param contentType      内容类型
+     * @param progressListener 进度监听器（可选）
+     * @return 写入响应
+     */
+    ObjectWriteResponse uploadWithInstantUpload(String bucketName, String objectName,
+                                                InputStream stream, String contentType,
+                                                ProgressListener progressListener);
+
+    /**
+     * 上传文件并记录内容哈希（不自动判断秒传）。
+     * <p>上传完成后在用户元数据中记录 MD5 哈希值。</p>
+     *
+     * @param bucketName  Bucket 名称
+     * @param objectName  对象名
+     * @param stream      文件流
+     * @param contentType 内容类型
+     * @return 写入响应
+     */
+    ObjectWriteResponse uploadWithHash(String bucketName, String objectName,
+                                       InputStream stream, String contentType);
 
     // ===================== 其他操作 =====================
 

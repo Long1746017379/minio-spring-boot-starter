@@ -5,6 +5,7 @@ import com.along.boot.minio.template.DefaultMinioTemplate;
 import com.along.boot.minio.template.MinioTemplate;
 import com.along.boot.minio.util.MinioBucketManager;
 import com.along.boot.minio.util.MinioUtil;
+import com.along.boot.minio.util.S3MultipartClient;
 import io.minio.MinioClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,6 +21,7 @@ import org.springframework.context.annotation.Configuration;
  * <p>当 classpath 中存在 {@link MinioClient} 且配置项 {@code minio.enabled=true}（默认）时生效。</p>
  * <ul>
  *   <li>自动创建 {@link MinioClient} 实例</li>
+ *   <li>自动创建 {@link S3MultipartClient} 实例（支持手动分片上传）</li>
  *   <li>自动创建 {@link MinioBucketManager} 并兜底创建默认 Bucket</li>
  *   <li>自动注册 {@link MinioTemplate} 和 {@link MinioUtil}</li>
  * </ul>
@@ -58,6 +60,23 @@ public class MinioAutoConfiguration {
     }
 
     /**
+     * 创建 S3 分片上传客户端，用于手动分片上传（断点续传）。
+     *
+     * @param props MinIO 配置属性
+     * @return S3MultipartClient 实例
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public S3MultipartClient s3MultipartClient(MinioProperties props) {
+        return new S3MultipartClient(
+                props.getEndpoint(),
+                props.getAccessKey(),
+                props.getSecretKey(),
+                props.getRegion()
+        );
+    }
+
+    /**
      * 创建 Bucket 管理器，用于兜底创建默认 Bucket。
      *
      * @param minioClient MinIO 客户端
@@ -72,17 +91,19 @@ public class MinioAutoConfiguration {
     /**
      * 创建 MinIO 操作模板，创建时自动确保默认 Bucket 存在。
      *
-     * @param minioClient   MinIO 客户端
-     * @param props         MinIO 配置属性
-     * @param bucketManager Bucket 管理器
+     * @param minioClient     MinIO 客户端
+     * @param props           MinIO 配置属性
+     * @param bucketManager   Bucket 管理器
+     * @param multipartClient S3 分片上传客户端
      * @return MinioTemplate 实例
      */
     @Bean
     @ConditionalOnMissingBean
     public MinioTemplate minioTemplate(MinioClient minioClient, MinioProperties props,
-                                       MinioBucketManager bucketManager) {
+                                       MinioBucketManager bucketManager,
+                                       S3MultipartClient multipartClient) {
         bucketManager.createIfAbsent(props.getBucket());
-        return new DefaultMinioTemplate(minioClient, props);
+        return new DefaultMinioTemplate(minioClient, props, multipartClient);
     }
 
     /**

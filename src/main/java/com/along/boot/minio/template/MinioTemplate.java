@@ -363,6 +363,17 @@ public interface MinioTemplate {
     ObjectWriteResponse uploadWithHash(String bucketName, String objectName,
                                        InputStream stream, String contentType);
 
+    /**
+     * 上传本地文件（自动分片，适用于大文件）。
+     * <p>底层使用 SDK 的 {@code uploadObject}，文件分片上传失败时会自动重试单分片。</p>
+     *
+     * @param bucketName  Bucket 名称
+     * @param objectName  对象名
+     * @param filePath    本地文件路径
+     * @param contentType 内容类型
+     */
+    void uploadFile(String bucketName, String objectName, String filePath, String contentType);
+
     // ===================== 其他操作 =====================
 
     /**

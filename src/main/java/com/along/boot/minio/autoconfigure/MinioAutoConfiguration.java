@@ -48,7 +48,7 @@ public class MinioAutoConfiguration {
      * @return MinioClient 实例
      */
     @Bean
-    @ConditionalOnMissingBean
+    @ConditionalOnMissingBean // 只有当 Spring 容器中不存在指定类型的 Bean 时，才注册当前方法所创建的 Bean
     public MinioClient minioClient(MinioProperties props) {
         MinioClient minioClient = MinioClient.builder()
                 .endpoint(props.getEndpoint())

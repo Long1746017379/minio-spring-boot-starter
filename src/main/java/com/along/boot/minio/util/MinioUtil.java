@@ -89,6 +89,24 @@ public class MinioUtil {
     }
 
     /**
+     * 上传文件（指定文件大小和分片大小，大文件建议使用此方法）。
+     * <p>当 {@code objectSize > partSize} 时 SDK 自动走分片上传。</p>
+     *
+     * @param bucket      Bucket 名称
+     * @param objectName  对象名
+     * @param inputStream 文件流
+     * @param contentType 内容类型
+     * @param objectSize  文件总大小（字节），-1 表示未知
+     * @param partSize    分片大小（字节）
+     * @return 文件外链
+     */
+    public String upload(String bucket, String objectName, InputStream inputStream,
+                         String contentType, long objectSize, int partSize) {
+        minioTemplate.upload(bucket, objectName, inputStream, contentType, objectSize, partSize);
+        return buildObjectUrl(bucket, objectName);
+    }
+
+    /**
      * 上传 MultipartFile 并监听进度，返回外链。
      *
      * @param bucket           Bucket 名称
@@ -105,6 +123,20 @@ public class MinioUtil {
         } catch (IOException e) {
             throw new RuntimeException("Upload file failed", e);
         }
+    }
+
+    /**
+     * 上传本地文件（自动分片上传，适用于大文件）。
+     *
+     * @param bucket     Bucket 名称
+     * @param objectName 对象名
+     * @param filePath   本地文件路径
+     * @param contentType 内容类型
+     * @return 文件外链
+     */
+    public String uploadFile(String bucket, String objectName, String filePath, String contentType) {
+        minioTemplate.uploadFile(bucket, objectName, filePath, contentType);
+        return buildObjectUrl(bucket, objectName);
     }
 
     // ===================== 下载 =====================

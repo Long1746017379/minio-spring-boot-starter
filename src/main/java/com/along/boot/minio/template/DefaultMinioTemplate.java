@@ -24,6 +24,7 @@ import io.minio.Result;
 import io.minio.SetBucketPolicyArgs;
 import io.minio.StatObjectArgs;
 import io.minio.StatObjectResponse;
+import io.minio.UploadObjectArgs;
 import io.minio.UploadPartResponse;
 import io.minio.http.Method;
 import io.minio.messages.Bucket;
@@ -364,6 +365,27 @@ public class DefaultMinioTemplate implements MinioTemplate {
             );
         } catch (Exception e) {
             throw new MinioOperationException("Set bucket policy failed: " + bucketName, e);
+        }
+    }
+
+    // ===================== 分片上传（文件） =====================
+
+    @Override
+    public void uploadFile(String bucketName, String objectName, String filePath, String contentType) {
+        try {
+            logger.info("Uploading file (multipart): bucket={}, object={}, file={}", bucketName, objectName, filePath);
+            minioClient.uploadObject(
+                    UploadObjectArgs.builder()
+                            .bucket(bucketName)
+                            .object(objectName)
+                            .filename(filePath)
+                            .contentType(contentType)
+                            .build()
+            );
+            logger.info("Upload file completed: bucket={}, object={}", bucketName, objectName);
+        } catch (Exception e) {
+            logger.error("Upload file failed: bucket={}, object={}", bucketName, objectName, e);
+            throw new MinioOperationException("Upload file failed: " + objectName, e);
         }
     }
 

@@ -67,6 +67,16 @@ minio.secretKey = minioadmin
 minio.bucket = default
 ```
 
+## 版本兼容
+
+| Spring Boot | 是否零配置可用 | 说明 |
+|---|---|---|
+| 3.x | 是 | 使用 1.1.0+ |
+| 2.7.x | 是 | 使用 1.1.0+ |
+| 2.2 ~ 2.6 | 需覆盖依赖 | 需覆盖 OkHttp 4.12.0、Kotlin 1.8.21、Jackson 2.15.3 |
+
+完整的引入方式、依赖覆盖片段和常见问题见 [使用说明.md](./使用说明.md)。
+
 ## 业务层使用
 
 > 注入 `MinioTemplate` 或 `MinioUtil` 即可使用。

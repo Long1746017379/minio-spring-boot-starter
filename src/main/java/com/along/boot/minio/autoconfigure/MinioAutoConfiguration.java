@@ -22,8 +22,8 @@ import org.springframework.context.annotation.Configuration;
  * <ul>
  *   <li>自动创建 {@link MinioClient} 实例</li>
  *   <li>自动创建 {@link S3MultipartClient} 实例（支持手动分片上传）</li>
- *   <li>自动创建 {@link MinioBucketManager} 并兜底创建默认 Bucket</li>
- *   <li>自动注册 {@link MinioTemplate} 和 {@link MinioUtil}</li>
+ *   <li>自动创建 {@link MinioBucketManager}，按配置兜底创建默认 Bucket</li>
+ *   <li>自动注册 {@link MinioTemplate}；存在 spring-web 时注册 {@link MinioUtil}</li>
  * </ul>
  *
  * @author along
@@ -89,7 +89,8 @@ public class MinioAutoConfiguration {
     }
 
     /**
-     * 创建 MinIO 操作模板，创建时自动确保默认 Bucket 存在。
+     * 创建 MinIO 操作模板；是否在创建时检查并创建默认 Bucket 由
+     * {@code minio.create-bucket-on-startup} 控制。
      *
      * @param minioClient     MinIO 客户端
      * @param props           MinIO 配置属性
@@ -115,6 +116,12 @@ public class MinioAutoConfiguration {
     @ConditionalOnClass(name = "org.springframework.web.multipart.MultipartFile")
     static class MinioMultipartConfiguration {
 
+        /**
+         * 创建 MinIO 工具类。
+         *
+         * @param minioTemplate MinIO 操作模板
+         * @return MinioUtil 实例
+         */
         @Bean
         @ConditionalOnMissingBean
         public MinioUtil minioUtil(MinioTemplate minioTemplate) {

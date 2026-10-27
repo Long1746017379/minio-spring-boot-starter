@@ -52,7 +52,7 @@ minio-spring-boot-starter
 <dependency>
     <groupId>com.along.boot</groupId>
     <artifactId>minio-spring-boot-starter</artifactId>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
 </dependency>
 ```
 

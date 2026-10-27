@@ -109,15 +109,17 @@ public class MinioAutoConfiguration {
     }
 
     /**
-     * 创建 MinIO 工具类。
-     *
-     * @param minioTemplate MinIO 操作模板
-     * @return MinioUtil 实例
+     * MultipartFile 相关能力，仅在存在 spring-web 时注册。
      */
-    @Bean
-    @ConditionalOnMissingBean
-    public MinioUtil minioUtil(MinioTemplate minioTemplate) {
-        return new MinioUtil(minioTemplate);
+    @Configuration
+    @ConditionalOnClass(name = "org.springframework.web.multipart.MultipartFile")
+    static class MinioMultipartConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean
+        public MinioUtil minioUtil(MinioTemplate minioTemplate) {
+            return new MinioUtil(minioTemplate);
+        }
     }
 
 }

@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Build**: `mvn clean package -DskipTests` (project has no tests)
 - **Install to local repo**: `mvn clean install -DskipTests`
 - **Generate sources JAR**: `mvn source:jar`
-- **Java**: 1.8 source/target, Spring Boot 2.2.13.RELEASE, MinIO SDK 8.5.7
+- **Java**: Java 8 bytecode via `<release>8</release>`; build with JDK 9+ (verified on 17), Spring Boot 2.2.13.RELEASE, MinIO SDK 8.5.7
 - **IDE hint**: Run `mvn clean compile` after pulling new dependencies
 
 ## Architecture
@@ -46,8 +46,8 @@ src/main/java/com/along/boot/minio/
 - **Instant upload (秒传)**: Content-based dedup via MD5 hash. On upload, computes hash, checks for a marker object at `.__minio_hash/{hash}`. If found, does server-side copy instead of re-uploading.
 - **Resumable upload**: `resumeUpload()` lists already-uploaded parts via `uploadId`, skips them, only uploads missing parts.
 - **Auto-configuration gating**: All beans conditional on `@ConditionalOnClass(MinioClient.class)` and `@ConditionalOnProperty(prefix="minio", name="enabled", matchIfMissing=true)`. Each bean also uses `@ConditionalOnMissingBean` to allow user overrides.
-- **Configurable timeouts**: connect=10s, read=30s, write=30s, call=60s in `MinioProperties`. `S3MultipartClient` has its own hardcoded timeouts (connect=10s, read=30s, write=60s).
-- **Logging**: Uses Logback (logback-classic 1.2.11). Logged at INFO level for key lifecycle events (client creation, upload start/complete, failures).
+- **Timeout properties**: `minio.connectTimeout`/`readTimeout`/`writeTimeout`/`callTimeout` (10s/30s/30s/60s) are defined in `MinioProperties` but currently not applied to `MinioClient`. `S3MultipartClient` has its own hardcoded timeouts (connect=10s, read=30s, write=60s).
+- **Logging**: Uses the SLF4J API only (`@Slf4j` / `LoggerFactory`); no logging implementation is pinned by the starter. Logged at INFO level for key lifecycle events (client creation, upload start/complete, failures).
 
 ### Configuration properties (`application.properties` / `application.yml`)
 
@@ -73,3 +73,14 @@ src/main/java/com/along/boot/minio/
 - `S3MultipartClient` parses XML responses manually with `DocumentBuilderFactory` (no JAXB dependency)
 - The `buildObjectUrl` in `MinioUtil` actually generates a presigned GET URL (not a simple object URL)
 - `isObjectExist` in `DefaultMinioTemplate` swallows all exceptions (returns false); `MinioUtil.isObjectExistBak` is the more precise variant that checks for `NoSuchKey` specifically
+
+## Compatibility
+
+- Supports Spring Boot 2.7 ~ 3.x. Both registration files are shipped: `META-INF/spring.factories` (Boot 2.x) and `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` (Boot 3.x).
+- `minio.create-bucket-on-startup` (default true) controls whether the default bucket is created during startup.
+- `MinioUtil` is only registered when `spring-web` (`MultipartFile`) is on the classpath; non-web applications get `MinioTemplate` only.
+- Compatibility integration tests live outside the root reactor (`compatibility-tests/`):
+  ```bash
+  mvn -f compatibility-tests/boot2-it test
+  mvn -f compatibility-tests/boot3-it test
+  ```

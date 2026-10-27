@@ -38,7 +38,9 @@ minio-spring-boot-starter
 │
 └── src/main/resources
     └── META-INF
-        └── spring.factories
+        ├── spring.factories
+        └── spring
+            └── org.springframework.boot.autoconfigure.AutoConfiguration.imports
 
 ```
 
@@ -65,6 +67,7 @@ minio.endpoint = http://192.168.253.100:19000
 minio.accessKey = minioadmin
 minio.secretKey = minioadmin
 minio.bucket = default
+minio.create-bucket-on-startup = true
 ```
 
 ## 版本兼容
@@ -73,13 +76,13 @@ minio.bucket = default
 |---|---|---|
 | 3.x | 是 | 使用 1.1.0+ |
 | 2.7.x | 是 | 使用 1.1.0+ |
-| 2.2 ~ 2.6 | 需覆盖依赖 | 需覆盖 OkHttp 4.12.0、Kotlin 1.8.21、Jackson 2.15.3 |
+| 2.2 ~ 2.6 | 需覆盖依赖 | 需覆盖 OkHttp 4.12.0、Kotlin 1.8.21；建议对齐 Jackson 2.15.3 |
 
 完整的引入方式、依赖覆盖片段和常见问题见 [使用说明.md](./使用说明.md)。
 
 ## 业务层使用
 
-> 注入 `MinioTemplate` 或 `MinioUtil` 即可使用。
+> 注入 `MinioTemplate` 或 `MinioUtil` 即可使用。非 Web 应用只会注册 `MinioTemplate`；`MinioUtil` 依赖 `spring-web`，缺少时不会创建。
 
 ```java
 @Autowired

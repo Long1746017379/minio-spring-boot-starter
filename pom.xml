@@ -7,7 +7,7 @@
     <groupId>com.along.boot</groupId>
     <artifactId>minio-spring-boot-starter</artifactId>
     <name>minio-spring-boot-starter</name>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
     <packaging>jar</packaging>
 
     <properties>

@@ -25,6 +25,10 @@ src/main/java/com/along/boot/minio/
 │   └── ProgressListener.java         — @FunctionalInterface for upload progress
 ├── exception/
 │   └── MinioOperationException.java  — RuntimeException wrapper for all MinIO errors
+├── model/
+│   ├── ContentCheckResult.java       — Instant-upload check result (NOT_FOUND / EXISTS / STALE)
+│   ├── MultipartUploadInfo.java      — In-progress multipart upload info
+│   └── MultipartUploadStatus.java    — Uploaded parts and missing-part calculation
 ├── properties/
 │   └── MinioProperties.java          — @ConfigurationProperties(prefix = "minio")
 ├── template/
@@ -46,6 +50,9 @@ src/main/java/com/along/boot/minio/
 - **Multipart upload via SDK protected APIs**: MinIO SDK 8.5.x exposes multipart operations only as `protected` methods, so `CustomMinioClient extends MinioAsyncClient` exposes them; `S3MultipartClient` is a thin facade. SDK signing and XML parsing are reused, no hand-written SigV4.
 - **Instant upload (秒传)**: Content-based dedup via MD5 hash. On upload, the stream is spooled to a temp file while the hash is computed, then the marker object at `.__minio_hash/{hash}` is checked. If found, does server-side copy instead of re-uploading; a stale marker falls back to a normal upload.
 - **Resumable upload**: `resumeUpload()` lists already-uploaded parts via `uploadId`, skips them with `skipFully`, only uploads missing parts, and validates part size/count before merging.
+- **Client-side hash check**: `checkContent(bucket, hash)` reports NOT_FOUND / EXISTS / STALE with the source object; `copyFromHash()` performs the server-side copy so the client never transfers a duplicate file.
+- **Upload recovery**: `findUploadId()` locates the latest in-progress upload by object name via ListMultipartUploads; `getUploadStatus()` returns uploaded part numbers and sizes so the caller can send only missing parts.
+- **Hash-keyed chunked upload**: `initiateMultipartUpload(..., hash)` writes `.__minio_uploads/{hash}` with the uploadId; `findUploadIdByHash()` / `getUploadStatusByHash()` recover progress by MD5; `uploadChunk()` maps 0-based chunkIndex to partNumber+1; `completeUploadByHash()` merges, writes `.__minio_hash/{hash}`, and removes the in-progress marker. Stale in-progress markers are cleaned when `findUploadByHash()` sees `NoSuchUpload`.
 - **Auto-configuration gating**: All beans conditional on `@ConditionalOnClass(MinioClient.class)` and `@ConditionalOnProperty(prefix="minio", name="enabled", matchIfMissing=true)`. Each bean also uses `@ConditionalOnMissingBean` to allow user overrides.
 - **Timeout properties**: `minio.connectTimeout`/`readTimeout`/`writeTimeout`/`callTimeout` (10s/30s/30s/60s) are defined in `MinioProperties` but currently not applied to `MinioClient`. `S3MultipartClient` has its own hardcoded timeouts (connect=10s, read=30s, write=60s).
 - **Logging**: Uses the SLF4J API only (`@Slf4j` / `LoggerFactory`); no logging implementation is pinned by the starter. Logged at INFO level for key lifecycle events (client creation, upload start/complete, failures).
@@ -72,7 +79,8 @@ src/main/java/com/along/boot/minio/
 - `DefaultMinioTemplate.upload()` with unknown size uses 10MB part size: `.stream(stream, -1, 10 * 1024 * 1024)`
 - Hash marker objects live under `.__minio_hash/` prefix in the bucket
 - Instant upload spools the stream to a temp file for MD5 computation, so memory stays bounded for large files
-- Multipart requests are signed and parsed by the MinIO SDK; no manual SigV4 or XML handling
+- Multipart part requests are signed and parsed by the MinIO SDK; no manual SigV4 or XML handling
+- `listMultipartUploads` reuses the SDK's URL builder and `Signer.presignV4` but parses the response XML itself: SDK 8.5.x requires a non-empty `<StorageClass>`, while MinIO may return an empty value and break the SDK parser
 - The `buildObjectUrl` in `MinioUtil` actually generates a presigned GET URL (not a simple object URL)
 - `isObjectExist` in `DefaultMinioTemplate` swallows all exceptions (returns false); `MinioUtil.isObjectExistBak` is the more precise variant that checks for `NoSuchKey` specifically
 

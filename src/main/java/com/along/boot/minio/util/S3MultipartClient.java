@@ -1,6 +1,7 @@
 package com.along.boot.minio.util;
 
 import com.along.boot.minio.exception.MinioOperationException;
+import com.along.boot.minio.model.MultipartUploadInfo;
 import io.minio.MinioAsyncClient;
 import io.minio.ObjectWriteResponse;
 import io.minio.UploadPartResponse;
@@ -43,7 +44,7 @@ public class S3MultipartClient {
         if (region != null && !region.isEmpty()) {
             builder.region(region);
         }
-        this.client = new CustomMinioClient(builder.build());
+        this.client = new CustomMinioClient(builder.build(), accessKey, secretKey, httpClient);
     }
 
     /**
@@ -105,6 +106,21 @@ public class S3MultipartClient {
             return client.listParts(bucket, object, uploadId);
         } catch (Exception e) {
             throw new MinioOperationException("List parts failed", e);
+        }
+    }
+
+    /**
+     * 列举进行中的分片上传。
+     *
+     * @param bucket bucket 名称
+     * @param prefix 对象名前缀
+     * @return 进行中的上传列表
+     */
+    public List<MultipartUploadInfo> listMultipartUploads(String bucket, String prefix) {
+        try {
+            return client.listMultipartUploads(bucket, prefix);
+        } catch (Exception e) {
+            throw new MinioOperationException("List multipart uploads failed", e);
         }
     }
 

@@ -3,6 +3,8 @@ package com.along.boot.minio.template;
 import com.along.boot.minio.callback.MinioCallback;
 import com.along.boot.minio.callback.ProgressListener;
 import com.along.boot.minio.exception.MinioOperationException;
+import com.along.boot.minio.model.ContentCheckResult;
+import com.along.boot.minio.model.MultipartUploadInfo;
 import com.along.boot.minio.properties.MinioProperties;
 import com.along.boot.minio.util.MinioHashUtil;
 import com.along.boot.minio.util.S3MultipartClient;
@@ -26,6 +28,7 @@ import io.minio.StatObjectArgs;
 import io.minio.StatObjectResponse;
 import io.minio.UploadObjectArgs;
 import io.minio.UploadPartResponse;
+import io.minio.errors.ErrorResponseException;
 import io.minio.http.Method;
 import io.minio.messages.Bucket;
 import io.minio.messages.DeleteError;
@@ -64,6 +67,8 @@ public class DefaultMinioTemplate implements MinioTemplate {
     private static final Logger logger = LoggerFactory.getLogger(DefaultMinioTemplate.class);
 
     private static final String HASH_PREFIX = ".__minio_hash/";
+
+    private static final String UPLOAD_HASH_PREFIX = ".__minio_uploads/";
 
     private static final int MIN_PART_SIZE = 5 * 1024 * 1024;
 
@@ -511,6 +516,104 @@ public class DefaultMinioTemplate implements MinioTemplate {
     }
 
     @Override
+    public List<MultipartUploadInfo> listMultipartUploads(String bucketName, String prefix) {
+        try {
+            return multipartClient.listMultipartUploads(bucketName, prefix);
+        } catch (Exception e) {
+            throw new MinioOperationException("List multipart uploads failed: " + prefix, e);
+        }
+    }
+
+    @Override
+    public void registerUploadHash(String bucketName, String hash, String objectName,
+                                   String uploadId) {
+        try {
+            Map<String, String> userMetadata = new HashMap<>();
+            userMetadata.put("upload-id", uploadId);
+            userMetadata.put("object", objectName);
+            userMetadata.put("content-hash", hash);
+
+            minioClient.putObject(
+                    PutObjectArgs.builder()
+                            .bucket(bucketName)
+                            .object(UPLOAD_HASH_PREFIX + hash)
+                            .stream(new ByteArrayInputStream(new byte[0]), 0, -1)
+                            .userMetadata(userMetadata)
+                            .build()
+            );
+        } catch (Exception e) {
+            throw new MinioOperationException("Register upload hash failed: " + hash, e);
+        }
+    }
+
+    @Override
+    public void removeUploadHash(String bucketName, String hash) {
+        try {
+            minioClient.removeObject(
+                    RemoveObjectArgs.builder()
+                            .bucket(bucketName)
+                            .object(UPLOAD_HASH_PREFIX + hash)
+                            .build()
+            );
+        } catch (Exception e) {
+            throw new MinioOperationException("Remove upload hash failed: " + hash, e);
+        }
+    }
+
+    @Override
+    public Optional<MultipartUploadInfo> findUploadByHash(String bucketName, String hash) {
+        try {
+            StatObjectResponse marker = minioClient.statObject(
+                    StatObjectArgs.builder()
+                            .bucket(bucketName)
+                            .object(UPLOAD_HASH_PREFIX + hash)
+                            .build()
+            );
+            Map<String, String> metadata = marker.userMetadata();
+            String uploadId = metadata == null ? null : metadata.get("upload-id");
+            String objectName = metadata == null ? null : metadata.get("object");
+            if (uploadId == null || uploadId.isEmpty()
+                    || objectName == null || objectName.isEmpty()) {
+                logger.warn("Upload hash marker is incomplete: bucket={}, hash={}",
+                        bucketName, hash);
+                return Optional.empty();
+            }
+
+            try {
+                listParts(bucketName, objectName, uploadId);
+                return Optional.of(new MultipartUploadInfo(uploadId, objectName, null));
+            } catch (MinioOperationException e) {
+                if (isNoSuchUpload(e)) {
+                    removeUploadHash(bucketName, hash);
+                    return Optional.empty();
+                }
+                throw e;
+            }
+        } catch (ErrorResponseException e) {
+            if ("NoSuchKey".equals(e.errorResponse().code())) {
+                return Optional.empty();
+            }
+            throw new MinioOperationException("Find upload by hash failed: " + hash, e);
+        } catch (Exception e) {
+            throw new MinioOperationException("Find upload by hash failed: " + hash, e);
+        }
+    }
+
+    private boolean isNoSuchUpload(Throwable throwable) {
+        Throwable cause = throwable;
+        while (cause != null) {
+            if (cause instanceof ErrorResponseException) {
+                String code = ((ErrorResponseException) cause).errorResponse().code();
+                if ("NoSuchUpload".equals(code)) {
+                    return true;
+                }
+            }
+            cause = cause.getCause();
+        }
+        return false;
+    }
+
+    @Override
     public ObjectWriteResponse resumeUpload(String bucketName, String objectName,
                                             InputStream stream, long objectSize, int partSize,
                                             String uploadId) {
@@ -633,6 +736,63 @@ public class DefaultMinioTemplate implements MinioTemplate {
             return Optional.empty();
         } catch (Exception e) {
             return Optional.empty();
+        }
+    }
+
+    @Override
+    public ContentCheckResult checkContent(String bucketName, String hash) {
+        try {
+            StatObjectResponse marker = minioClient.statObject(
+                    StatObjectArgs.builder()
+                            .bucket(bucketName)
+                            .object(HASH_PREFIX + hash)
+                            .build()
+            );
+            Map<String, String> metadata = marker.userMetadata();
+            String source = metadata == null ? null : metadata.get("source-object");
+            if (source == null || source.isEmpty()) {
+                logger.warn("Content hash marker has no source object: bucket={}, hash={}",
+                        bucketName, hash);
+                return ContentCheckResult.notFound();
+            }
+
+            try {
+                StatObjectResponse sourceStat = minioClient.statObject(
+                        StatObjectArgs.builder()
+                                .bucket(bucketName)
+                                .object(source)
+                                .build()
+                );
+                return ContentCheckResult.exists(source, sourceStat.size(), sourceStat.etag());
+            } catch (ErrorResponseException e) {
+                if ("NoSuchKey".equals(e.errorResponse().code())) {
+                    return ContentCheckResult.stale(source);
+                }
+                throw e;
+            }
+        } catch (ErrorResponseException e) {
+            if ("NoSuchKey".equals(e.errorResponse().code())) {
+                return ContentCheckResult.notFound();
+            }
+            throw new MinioOperationException("Check content failed: " + hash, e);
+        } catch (Exception e) {
+            throw new MinioOperationException("Check content failed: " + hash, e);
+        }
+    }
+
+    @Override
+    public boolean copyFromHash(String bucketName, String hash, String targetObject) {
+        Optional<String> source = getContentHashSource(bucketName, hash);
+        if (!source.isPresent() || source.get().equals(targetObject)) {
+            return false;
+        }
+        try {
+            copyFile(bucketName, source.get(), bucketName, targetObject);
+            return true;
+        } catch (MinioOperationException e) {
+            logger.warn("Copy from content hash failed, caller should upload: "
+                    + "bucket={}, hash={}, target={}", bucketName, hash, targetObject, e);
+            return false;
         }
     }
 

@@ -2,6 +2,9 @@ package com.along.boot.minio.template;
 
 import com.along.boot.minio.callback.MinioCallback;
 import com.along.boot.minio.callback.ProgressListener;
+import com.along.boot.minio.model.ContentCheckResult;
+import com.along.boot.minio.model.MultipartUploadInfo;
+import com.along.boot.minio.model.MultipartUploadStatus;
 import io.minio.ObjectWriteResponse;
 import io.minio.StatObjectResponse;
 import io.minio.UploadPartResponse;
@@ -9,6 +12,8 @@ import io.minio.messages.Bucket;
 import io.minio.messages.Part;
 
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
@@ -253,6 +258,23 @@ public interface MinioTemplate {
     }
 
     /**
+     * 初始化分片上传、指定 Content-Type，并登记内容哈希映射。
+     * <p>登记后可以用 {@link #findUploadIdByHash(String, String)} 找回 uploadId。</p>
+     *
+     * @param bucketName  Bucket 名称
+     * @param objectName  对象名
+     * @param contentType 内容类型（如 image/jpeg），为空时不设置
+     * @param hash        MD5 内容哈希值（32 位十六进制小写）
+     * @return uploadId 分片上传唯一标识
+     */
+    default String initiateMultipartUpload(String bucketName, String objectName,
+                                           String contentType, String hash) {
+        String uploadId = initiateMultipartUpload(bucketName, objectName, contentType);
+        registerUploadHash(bucketName, hash, objectName, uploadId);
+        return uploadId;
+    }
+
+    /**
      * 上传单个分片。
      *
      * @param bucketName Bucket 名称
@@ -265,6 +287,28 @@ public interface MinioTemplate {
      */
     UploadPartResponse uploadPart(String bucketName, String objectName, String uploadId,
                                   int partNumber, InputStream stream, long partSize);
+
+    /**
+     * 上传一个客户端切片。
+     * <p>{@code chunkIndex} 从 0 开始，内部映射为 S3 的
+     * {@code partNumber = chunkIndex + 1}。除最后一片外，{@code chunkSize} 必须不小于
+     * 5MiB，且各片大小一致。</p>
+     *
+     * @param bucketName Bucket 名称
+     * @param objectName 对象名
+     * @param uploadId   分片上传 ID
+     * @param chunkIndex 切片编号（从 0 开始）
+     * @param stream     切片数据流
+     * @param chunkSize  切片大小（字节，必须与实际数据长度一致）
+     * @return UploadPartResponse
+     */
+    default UploadPartResponse uploadChunk(String bucketName, String objectName, String uploadId,
+                                           int chunkIndex, InputStream stream, long chunkSize) {
+        if (chunkIndex < 0) {
+            throw new IllegalArgumentException("chunkIndex must be >= 0");
+        }
+        return uploadPart(bucketName, objectName, uploadId, chunkIndex + 1, stream, chunkSize);
+    }
 
     /**
      * 列举已上传的分片列表。
@@ -333,6 +377,166 @@ public interface MinioTemplate {
         return resumeUpload(bucketName, objectName, stream, objectSize, partSize, uploadId);
     }
 
+    /**
+     * 列举进行中的分片上传。
+     *
+     * @param bucketName Bucket 名称
+     * @param prefix     对象名前缀
+     * @return 进行中的上传列表
+     */
+    default List<MultipartUploadInfo> listMultipartUploads(String bucketName, String prefix) {
+        throw new UnsupportedOperationException(
+                "listMultipartUploads is not supported by this MinioTemplate implementation");
+    }
+
+    /**
+     * 查找指定对象最近一次进行中的分片上传 uploadId。
+     * <p>前提是对象名稳定（例如包含文件哈希），否则无法找回。</p>
+     *
+     * @param bucketName Bucket 名称
+     * @param objectName 对象名
+     * @return uploadId，若不存在则返回 empty
+     */
+    default Optional<String> findUploadId(String bucketName, String objectName) {
+        MultipartUploadInfo latest = null;
+        for (MultipartUploadInfo upload : listMultipartUploads(bucketName, objectName)) {
+            if (!objectName.equals(upload.getObjectName())) {
+                continue;
+            }
+            if (latest == null
+                    || (upload.getInitiated() != null && latest.getInitiated() != null
+                    && upload.getInitiated().isAfter(latest.getInitiated()))) {
+                latest = upload;
+            }
+        }
+        return latest == null ? Optional.empty() : Optional.of(latest.getUploadId());
+    }
+
+    /**
+     * 查询分片上传进度。
+     *
+     * @param bucketName Bucket 名称
+     * @param objectName 对象名
+     * @param uploadId   分片上传 ID
+     * @return 上传进度
+     */
+    default MultipartUploadStatus getUploadStatus(String bucketName, String objectName,
+                                                  String uploadId) {
+        List<Part> parts = listParts(bucketName, objectName, uploadId);
+        List<Integer> partNumbers = new ArrayList<>();
+        long uploadedBytes = 0;
+        for (Part part : parts) {
+            partNumbers.add(part.partNumber());
+            uploadedBytes += part.partSize();
+        }
+        return new MultipartUploadStatus(bucketName, objectName, uploadId, partNumbers, uploadedBytes);
+    }
+
+    /**
+     * 登记"内容哈希 → 进行中分片上传"的映射。
+     * <p>默认实现不支持；{@code DefaultMinioTemplate} 会写入
+     * {@code .__minio_uploads/{hash}} 标记对象。</p>
+     *
+     * @param bucketName Bucket 名称
+     * @param hash       MD5 内容哈希值
+     * @param objectName 对象名
+     * @param uploadId   分片上传 ID
+     */
+    default void registerUploadHash(String bucketName, String hash, String objectName,
+                                    String uploadId) {
+        throw new UnsupportedOperationException(
+                "registerUploadHash is not supported by this MinioTemplate implementation");
+    }
+
+    /**
+     * 删除"内容哈希 → 进行中分片上传"的映射。
+     *
+     * @param bucketName Bucket 名称
+     * @param hash       MD5 内容哈希值
+     */
+    default void removeUploadHash(String bucketName, String hash) {
+        throw new UnsupportedOperationException(
+                "removeUploadHash is not supported by this MinioTemplate implementation");
+    }
+
+    /**
+     * 根据内容哈希查找进行中的分片上传。
+     * <p>实现会校验 uploadId 是否仍然有效；已完成或已取消的上传会被清理并返回 empty。</p>
+     *
+     * @param bucketName Bucket 名称
+     * @param hash       MD5 内容哈希值
+     * @return 上传信息；不存在或已失效时返回 empty
+     */
+    default Optional<MultipartUploadInfo> findUploadByHash(String bucketName, String hash) {
+        throw new UnsupportedOperationException(
+                "findUploadByHash is not supported by this MinioTemplate implementation");
+    }
+
+    /**
+     * 根据内容哈希查找进行中分片上传的 uploadId。
+     *
+     * @param bucketName Bucket 名称
+     * @param hash       MD5 内容哈希值
+     * @return uploadId，若不存在则返回 empty
+     */
+    default Optional<String> findUploadIdByHash(String bucketName, String hash) {
+        return findUploadByHash(bucketName, hash).map(MultipartUploadInfo::getUploadId);
+    }
+
+    /**
+     * 根据内容哈希查询分片上传进度。
+     * <p>返回的 {@link MultipartUploadStatus} 可用
+     * {@link MultipartUploadStatus#missingChunkIndexes(int)} 计算缺失切片。</p>
+     *
+     * @param bucketName Bucket 名称
+     * @param hash       MD5 内容哈希值
+     * @return 上传进度；不存在或已失效时返回 empty
+     */
+    default Optional<MultipartUploadStatus> getUploadStatusByHash(String bucketName, String hash) {
+        return findUploadByHash(bucketName, hash)
+                .map(upload -> getUploadStatus(bucketName, upload.getObjectName(),
+                        upload.getUploadId()));
+    }
+
+    /**
+     * 按内容哈希完成分片上传：合并分片、登记已完成内容的哈希、清理进行中映射。
+     *
+     * @param bucketName Bucket 名称
+     * @param hash       MD5 内容哈希值
+     * @return 写入响应
+     */
+    default ObjectWriteResponse completeUploadByHash(String bucketName, String hash) {
+        MultipartUploadInfo upload = findUploadByHash(bucketName, hash)
+                .orElseThrow(() -> new IllegalStateException(
+                        "No in-progress upload for hash " + hash));
+        List<Part> parts = new ArrayList<>(listParts(bucketName, upload.getObjectName(),
+                upload.getUploadId()));
+        if (parts.isEmpty()) {
+            throw new IllegalStateException("No uploaded parts for hash " + hash);
+        }
+        parts.sort(Comparator.comparingInt(Part::partNumber));
+        ObjectWriteResponse response = completeMultipartUpload(bucketName, upload.getObjectName(),
+                upload.getUploadId(), parts.toArray(new Part[0]));
+        createContentHashMarker(bucketName, hash, upload.getObjectName());
+        removeUploadHash(bucketName, hash);
+        return response;
+    }
+
+    /**
+     * 按内容哈希取消分片上传，并清理进行中映射。
+     *
+     * @param bucketName Bucket 名称
+     * @param hash       MD5 内容哈希值
+     */
+    default void abortUploadByHash(String bucketName, String hash) {
+        Optional<MultipartUploadInfo> upload = findUploadByHash(bucketName, hash);
+        if (upload.isPresent()) {
+            abortMultipartUpload(bucketName, upload.get().getObjectName(),
+                    upload.get().getUploadId());
+            removeUploadHash(bucketName, hash);
+        }
+    }
+
     // ===================== 秒传（内容哈希） =====================
 
     /**
@@ -362,6 +566,46 @@ public interface MinioTemplate {
      * @return 源对象路径，若不存在则返回 empty
      */
     Optional<String> getContentHashSource(String bucketName, String hash);
+
+    /**
+     * 检查内容哈希是否已存在，并返回源对象信息。
+     * <p>默认实现基于 {@link #isContentHashExist} 与 {@link #getContentHashSource}，
+     * 不返回 size/etag；{@code DefaultMinioTemplate} 会返回精确值。</p>
+     *
+     * @param bucketName Bucket 名称
+     * @param hash       MD5 内容哈希值（32 位十六进制小写）
+     * @return 检查结果
+     */
+    default ContentCheckResult checkContent(String bucketName, String hash) {
+        if (!isContentHashExist(bucketName, hash)) {
+            return ContentCheckResult.notFound();
+        }
+        return getContentHashSource(bucketName, hash)
+                .map(source -> ContentCheckResult.exists(source, -1L, null))
+                .orElseGet(ContentCheckResult::notFound);
+    }
+
+    /**
+     * 命中内容哈希时，把源对象复制到目标对象。
+     * <p>返回 false 表示未命中、源对象与目标相同或复制失败，调用方应按正常流程上传。</p>
+     *
+     * @param bucketName   Bucket 名称
+     * @param hash         MD5 内容哈希值
+     * @param targetObject 目标对象名
+     * @return true 表示服务端复制成功
+     */
+    default boolean copyFromHash(String bucketName, String hash, String targetObject) {
+        Optional<String> source = getContentHashSource(bucketName, hash);
+        if (!source.isPresent() || source.get().equals(targetObject)) {
+            return false;
+        }
+        try {
+            copyFile(bucketName, source.get(), bucketName, targetObject);
+            return true;
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
 
     /**
      * 上传文件并启用秒传能力。

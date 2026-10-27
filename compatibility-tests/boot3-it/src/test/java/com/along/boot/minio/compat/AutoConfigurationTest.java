@@ -1,7 +1,9 @@
 package com.along.boot.minio.compat;
 
 import com.along.boot.minio.template.MinioTemplate;
+import com.along.boot.minio.util.MinioBucketManager;
 import com.along.boot.minio.util.MinioUtil;
+import com.along.boot.minio.util.S3MultipartClient;
 import io.minio.MinioClient;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,5 +25,7 @@ class AutoConfigurationTest {
         assertThat(context.getBeanNamesForType(MinioTemplate.class)).hasSize(1);
         assertThat(context.getBeanNamesForType(MinioUtil.class)).hasSize(1);
         assertThat(context.getBeanNamesForType(MinioClient.class)).hasSize(1);
+        assertThat(context.getBeanNamesForType(S3MultipartClient.class)).hasSize(1);
+        assertThat(context.getBeanNamesForType(MinioBucketManager.class)).hasSize(1);
     }
 }

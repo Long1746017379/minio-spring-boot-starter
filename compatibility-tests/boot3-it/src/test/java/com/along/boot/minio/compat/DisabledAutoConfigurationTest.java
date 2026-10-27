@@ -1,7 +1,10 @@
 package com.along.boot.minio.compat;
 
 import com.along.boot.minio.template.MinioTemplate;
+import com.along.boot.minio.util.MinioBucketManager;
 import com.along.boot.minio.util.MinioUtil;
+import com.along.boot.minio.util.S3MultipartClient;
+import io.minio.MinioClient;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -21,5 +24,8 @@ class DisabledAutoConfigurationTest {
     void disabledPropertySkipsAllMinioBeans() {
         assertThat(context.getBeanNamesForType(MinioTemplate.class)).isEmpty();
         assertThat(context.getBeanNamesForType(MinioUtil.class)).isEmpty();
+        assertThat(context.getBeanNamesForType(MinioClient.class)).isEmpty();
+        assertThat(context.getBeanNamesForType(S3MultipartClient.class)).isEmpty();
+        assertThat(context.getBeanNamesForType(MinioBucketManager.class)).isEmpty();
     }
 }

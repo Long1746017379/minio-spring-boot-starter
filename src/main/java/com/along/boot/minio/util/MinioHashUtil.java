@@ -56,6 +56,16 @@ public class MinioHashUtil {
     }
 
     /**
+     * 将摘要字节数组转换为小写十六进制字符串。
+     *
+     * @param bytes 摘要字节数组
+     * @return 小写十六进制字符串
+     */
+    public static String toHex(byte[] bytes) {
+        return bytesToHex(bytes);
+    }
+
+    /**
      * 将字节数组转换为小写十六进制字符串。
      */
     private static String bytesToHex(byte[] bytes) {

@@ -54,7 +54,7 @@ minio-spring-boot-starter
 <dependency>
     <groupId>com.along.boot</groupId>
     <artifactId>minio-spring-boot-starter</artifactId>
-    <version>1.1.0</version>
+    <version>1.2.0</version>
 </dependency>
 ```
 
@@ -74,8 +74,8 @@ minio.create-bucket-on-startup = true
 
 | Spring Boot | 是否零配置可用 | 说明 |
 |---|---|---|
-| 3.x | 是 | 使用 1.1.0+ |
-| 2.7.x | 是 | 使用 1.1.0+ |
+| 3.x | 是 | 使用 1.2.0 |
+| 2.7.x | 是 | 使用 1.2.0 |
 | 2.2 ~ 2.6 | 需覆盖依赖 | 需覆盖 OkHttp 4.12.0、Kotlin 1.8.21；建议对齐 Jackson 2.15.3 |
 
 完整的引入方式、依赖覆盖片段和常见问题见 [使用说明.md](./使用说明.md)。

@@ -2,7 +2,6 @@ package com.along.boot.minio.template;
 
 import com.along.boot.minio.callback.MinioCallback;
 import com.along.boot.minio.callback.ProgressListener;
-import com.along.boot.minio.callback.ProgressListener;
 import io.minio.ObjectWriteResponse;
 import io.minio.StatObjectResponse;
 import io.minio.UploadPartResponse;
@@ -240,6 +239,20 @@ public interface MinioTemplate {
     String initiateMultipartUpload(String bucketName, String objectName);
 
     /**
+     * 初始化分片上传并指定 Content-Type。
+     * <p>默认实现忽略 contentType，以保持与已有实现类的二进制兼容；
+     * {@code DefaultMinioTemplate} 会真正写入对象元数据。</p>
+     *
+     * @param bucketName  Bucket 名称
+     * @param objectName  对象名
+     * @param contentType 内容类型（如 image/jpeg），为空时不设置
+     * @return uploadId 分片上传唯一标识
+     */
+    default String initiateMultipartUpload(String bucketName, String objectName, String contentType) {
+        return initiateMultipartUpload(bucketName, objectName);
+    }
+
+    /**
      * 上传单个分片。
      *
      * @param bucketName Bucket 名称
@@ -299,6 +312,26 @@ public interface MinioTemplate {
     ObjectWriteResponse resumeUpload(String bucketName, String objectName,
                                      InputStream stream, long objectSize, int partSize,
                                      String uploadId);
+
+    /**
+     * 断点续传高阶接口（指定 Content-Type）。
+     * <p>默认实现忽略 contentType，以保持与已有实现类的二进制兼容；
+     * {@code DefaultMinioTemplate} 会真正写入对象元数据。</p>
+     *
+     * @param bucketName  Bucket 名称
+     * @param objectName  对象名
+     * @param stream      文件输入流
+     * @param objectSize  文件总大小（必须已知）
+     * @param partSize    分片大小（字节），建议 5MB ~ 50MB
+     * @param uploadId    null 则新建，非 null 则继续该 uploadId
+     * @param contentType 内容类型，为空时不设置；仅在新建分片上传时生效
+     * @return 写入响应
+     */
+    default ObjectWriteResponse resumeUpload(String bucketName, String objectName,
+                                             InputStream stream, long objectSize, int partSize,
+                                             String uploadId, String contentType) {
+        return resumeUpload(bucketName, objectName, stream, objectSize, partSize, uploadId);
+    }
 
     // ===================== 秒传（内容哈希） =====================
 

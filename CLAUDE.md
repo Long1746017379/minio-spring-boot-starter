@@ -35,16 +35,17 @@ src/main/java/com/along/boot/minio/
     ├── MinioBucketManager.java       — Ensures default bucket exists on startup
     ├── MinioHashUtil.java            — MD5 hash computation for content dedup
     ├── MinioUtil.java                — Business-layer convenience wrapper (MultipartFile, etc.)
-    ├── S3MultipartClient.java        — Raw S3 REST API calls via OkHttp + SigV4
-    └── S3Signer.java                 — AWS Signature V4 implementation
+    ├── CustomMinioClient.java        — Exposes MinioAsyncClient protected multipart APIs
+    ├── S3MultipartClient.java        — Thin facade over CustomMinioClient (same public API)
+    └── S3Signer.java                 — Legacy AWS Signature V4 implementation (@Deprecated)
 ```
 
 ### Key design decisions
 
 - **Template pattern**: `MinioTemplate` interface + `DefaultMinioTemplate` with `execute(MinioCallback)` escape hatch — same concept as `RedisTemplate.execute(RedisCallback)`.
-- **Multipart upload via raw HTTP**: MinIO SDK 8.5.7 doesn't expose multipart operations publicly, so `S3MultipartClient` calls S3 REST API directly using OkHttp + AWS Signature V4 signing.
-- **Instant upload (秒传)**: Content-based dedup via MD5 hash. On upload, computes hash, checks for a marker object at `.__minio_hash/{hash}`. If found, does server-side copy instead of re-uploading.
-- **Resumable upload**: `resumeUpload()` lists already-uploaded parts via `uploadId`, skips them, only uploads missing parts.
+- **Multipart upload via SDK protected APIs**: MinIO SDK 8.5.x exposes multipart operations only as `protected` methods, so `CustomMinioClient extends MinioAsyncClient` exposes them; `S3MultipartClient` is a thin facade. SDK signing and XML parsing are reused, no hand-written SigV4.
+- **Instant upload (秒传)**: Content-based dedup via MD5 hash. On upload, the stream is spooled to a temp file while the hash is computed, then the marker object at `.__minio_hash/{hash}` is checked. If found, does server-side copy instead of re-uploading; a stale marker falls back to a normal upload.
+- **Resumable upload**: `resumeUpload()` lists already-uploaded parts via `uploadId`, skips them with `skipFully`, only uploads missing parts, and validates part size/count before merging.
 - **Auto-configuration gating**: All beans conditional on `@ConditionalOnClass(MinioClient.class)` and `@ConditionalOnProperty(prefix="minio", name="enabled", matchIfMissing=true)`. Each bean also uses `@ConditionalOnMissingBean` to allow user overrides.
 - **Timeout properties**: `minio.connectTimeout`/`readTimeout`/`writeTimeout`/`callTimeout` (10s/30s/30s/60s) are defined in `MinioProperties` but currently not applied to `MinioClient`. `S3MultipartClient` has its own hardcoded timeouts (connect=10s, read=30s, write=60s).
 - **Logging**: Uses the SLF4J API only (`@Slf4j` / `LoggerFactory`); no logging implementation is pinned by the starter. Logged at INFO level for key lifecycle events (client creation, upload start/complete, failures).
@@ -58,6 +59,7 @@ src/main/java/com/along/boot/minio/
 | `minio.accessKey` | minioadmin | Access key |
 | `minio.secretKey` | minioadmin | Secret key |
 | `minio.bucket` | default | Default bucket name |
+| `minio.create-bucket-on-startup` | true | Check/create the default bucket on startup |
 | `minio.region` | us-east-1 | AWS region (for multipart) |
 | `minio.connectTimeout` | 10000 | Connection timeout (ms) |
 | `minio.readTimeout` | 30000 | Read timeout (ms) |
@@ -69,8 +71,8 @@ src/main/java/com/along/boot/minio/
 
 - `DefaultMinioTemplate.upload()` with unknown size uses 10MB part size: `.stream(stream, -1, 10 * 1024 * 1024)`
 - Hash marker objects live under `.__minio_hash/` prefix in the bucket
-- Instant upload stores entire file in memory (byte array) for MD5 computation — large files may cause OOM
-- `S3MultipartClient` parses XML responses manually with `DocumentBuilderFactory` (no JAXB dependency)
+- Instant upload spools the stream to a temp file for MD5 computation, so memory stays bounded for large files
+- Multipart requests are signed and parsed by the MinIO SDK; no manual SigV4 or XML handling
 - The `buildObjectUrl` in `MinioUtil` actually generates a presigned GET URL (not a simple object URL)
 - `isObjectExist` in `DefaultMinioTemplate` swallows all exceptions (returns false); `MinioUtil.isObjectExistBak` is the more precise variant that checks for `NoSuchKey` specifically
 
@@ -79,8 +81,3 @@ src/main/java/com/along/boot/minio/
 - Supports Spring Boot 2.7 ~ 3.x. Both registration files are shipped: `META-INF/spring.factories` (Boot 2.x) and `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` (Boot 3.x).
 - `minio.create-bucket-on-startup` (default true) controls whether the default bucket is created during startup.
 - `MinioUtil` is only registered when `spring-web` (`MultipartFile`) is on the classpath; non-web applications get `MinioTemplate` only.
-- Compatibility integration tests live outside the root reactor (`compatibility-tests/`):
-  ```bash
-  mvn -f compatibility-tests/boot2-it test
-  mvn -f compatibility-tests/boot3-it test
-  ```

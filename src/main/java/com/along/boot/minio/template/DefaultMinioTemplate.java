@@ -36,9 +36,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.DigestOutputStream;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -60,6 +64,10 @@ public class DefaultMinioTemplate implements MinioTemplate {
     private static final Logger logger = LoggerFactory.getLogger(DefaultMinioTemplate.class);
 
     private static final String HASH_PREFIX = ".__minio_hash/";
+
+    private static final int MIN_PART_SIZE = 5 * 1024 * 1024;
+
+    private static final int MAX_PART_COUNT = 10000;
 
     private final MinioClient minioClient;
 
@@ -435,8 +443,13 @@ public class DefaultMinioTemplate implements MinioTemplate {
 
     @Override
     public String initiateMultipartUpload(String bucketName, String objectName) {
+        return initiateMultipartUpload(bucketName, objectName, null);
+    }
+
+    @Override
+    public String initiateMultipartUpload(String bucketName, String objectName, String contentType) {
         try {
-            return multipartClient.initiateMultipartUpload(bucketName, objectName);
+            return multipartClient.initiateMultipartUpload(bucketName, objectName, contentType);
         } catch (Exception e) {
             throw new MinioOperationException("Initiate multipart upload failed: " + objectName, e);
         }
@@ -445,10 +458,22 @@ public class DefaultMinioTemplate implements MinioTemplate {
     @Override
     public UploadPartResponse uploadPart(String bucketName, String objectName, String uploadId,
                                          int partNumber, InputStream stream, long partSize) {
+        if (partSize <= 0 || partSize > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("partSize must be between 1 and "
+                    + Integer.MAX_VALUE + " bytes");
+        }
         try {
-            byte[] data = toByteArray(stream);
+            byte[] buffer = new byte[(int) partSize];
+            int bytesRead = readFully(stream, buffer, buffer.length);
+            if (bytesRead != buffer.length) {
+                throw new MinioOperationException("Unexpected end of stream while reading part "
+                        + partNumber + ": expected " + partSize + " bytes, got " + bytesRead,
+                        new IOException("Unexpected end of stream"));
+            }
             return multipartClient.uploadPart(
-                    bucketName, objectName, uploadId, partNumber, data);
+                    bucketName, objectName, uploadId, partNumber, buffer);
+        } catch (MinioOperationException e) {
+            throw e;
         } catch (Exception e) {
             throw new MinioOperationException("Upload part failed: " + objectName
                     + ", part=" + partNumber, e);
@@ -489,10 +514,34 @@ public class DefaultMinioTemplate implements MinioTemplate {
     public ObjectWriteResponse resumeUpload(String bucketName, String objectName,
                                             InputStream stream, long objectSize, int partSize,
                                             String uploadId) {
+        return resumeUpload(bucketName, objectName, stream, objectSize, partSize, uploadId, null);
+    }
+
+    @Override
+    public ObjectWriteResponse resumeUpload(String bucketName, String objectName,
+                                            InputStream stream, long objectSize, int partSize,
+                                            String uploadId, String contentType) {
+        if (objectSize < 0) {
+            throw new IllegalArgumentException("objectSize must be >= 0 for resume upload");
+        }
+        if (objectSize > 0) {
+            validatePartSize(objectSize, partSize);
+        }
         try {
+            if (objectSize == 0) {
+                PutObjectArgs.Builder builder = PutObjectArgs.builder()
+                        .bucket(bucketName)
+                        .object(objectName)
+                        .stream(new ByteArrayInputStream(new byte[0]), 0, -1);
+                if (contentType != null && !contentType.isEmpty()) {
+                    builder.contentType(contentType);
+                }
+                return minioClient.putObject(builder.build());
+            }
+
             String effectiveUploadId = uploadId != null
                     ? uploadId
-                    : initiateMultipartUpload(bucketName, objectName);
+                    : initiateMultipartUpload(bucketName, objectName, contentType);
 
             List<Part> existingParts = listParts(bucketName, objectName, effectiveUploadId);
             Set<Integer> uploadedPartNumbers = new HashSet<>();
@@ -503,15 +552,23 @@ public class DefaultMinioTemplate implements MinioTemplate {
             }
 
             int partCount = (int) Math.ceil((double) objectSize / partSize);
-            byte[] buffer = new byte[partSize];
+            validateExistingParts(existingParts, objectSize, partSize, partCount);
 
+            byte[] buffer = new byte[partSize];
             for (int partNumber = 1; partNumber <= partCount; partNumber++) {
                 long currentPartSize = Math.min(partSize,
                         objectSize - (long) (partNumber - 1) * partSize);
-                int bytesRead = readFully(stream, buffer, (int) currentPartSize);
 
                 if (uploadedPartNumbers.contains(partNumber)) {
+                    skipFully(stream, currentPartSize);
                     continue;
+                }
+
+                int bytesRead = readFully(stream, buffer, (int) currentPartSize);
+                if (bytesRead != currentPartSize) {
+                    throw new MinioOperationException("Unexpected end of stream at part " + partNumber
+                            + ": expected " + currentPartSize + " bytes, got " + bytesRead,
+                            new IOException("Unexpected end of stream"));
                 }
 
                 UploadPartResponse response = multipartClient.uploadPart(
@@ -523,6 +580,8 @@ public class DefaultMinioTemplate implements MinioTemplate {
             allParts.sort(Comparator.comparingInt(Part::partNumber));
             return completeMultipartUpload(bucketName, objectName, effectiveUploadId,
                     allParts.toArray(new Part[0]));
+        } catch (MinioOperationException e) {
+            throw e;
         } catch (Exception e) {
             throw new MinioOperationException("Resume upload failed: " + objectName, e);
         }
@@ -581,81 +640,181 @@ public class DefaultMinioTemplate implements MinioTemplate {
     public ObjectWriteResponse uploadWithInstantUpload(String bucketName, String objectName,
                                                        InputStream stream, String contentType,
                                                        ProgressListener progressListener) {
+        SpooledContent content = null;
         try {
-            byte[] fileBytes = toByteArray(stream);
-            String hash = MinioHashUtil.computeMD5(fileBytes);
+            content = spoolWithMD5(stream);
 
-            Optional<String> sourceOpt = getContentHashSource(bucketName, hash);
-            if (sourceOpt.isPresent()) {
-                logger.info("Instant upload detected (content hash match): bucket={}, object={}",
-                        bucketName, objectName);
-                return copyFile(bucketName, sourceOpt.get(), bucketName, objectName);
+            Optional<String> sourceOpt = getContentHashSource(bucketName, content.hash);
+            if (sourceOpt.isPresent() && !sourceOpt.get().equals(objectName)) {
+                try {
+                    logger.info("Instant upload detected (content hash match): bucket={}, object={}",
+                            bucketName, objectName);
+                    return copyFile(bucketName, sourceOpt.get(), bucketName, objectName);
+                } catch (MinioOperationException copyFailure) {
+                    logger.warn("Content hash marker points to an unavailable object, fallback to upload: "
+                            + "bucket={}, hash={}", bucketName, content.hash);
+                }
             }
 
             Map<String, String> userMetadata = new HashMap<>();
-            userMetadata.put("content-hash", hash);
+            userMetadata.put("content-hash", content.hash);
 
-            InputStream uploadStream = new ByteArrayInputStream(fileBytes);
-            if (progressListener != null) {
-                uploadStream = new ProgressInputStream(uploadStream, progressListener, fileBytes.length);
+            long size = Files.size(content.path);
+            try (InputStream fileStream = Files.newInputStream(content.path)) {
+                InputStream uploadStream = progressListener != null
+                        ? new ProgressInputStream(fileStream, progressListener, size)
+                        : fileStream;
+
+                PutObjectArgs.Builder builder = PutObjectArgs.builder()
+                        .bucket(bucketName)
+                        .object(objectName)
+                        .stream(uploadStream, size, -1)
+                        .userMetadata(userMetadata);
+                if (contentType != null && !contentType.isEmpty()) {
+                    builder.contentType(contentType);
+                }
+
+                ObjectWriteResponse response = minioClient.putObject(builder.build());
+                createContentHashMarker(bucketName, content.hash, objectName);
+                return response;
             }
-
-            ObjectWriteResponse response = minioClient.putObject(
-                    PutObjectArgs.builder()
-                            .bucket(bucketName)
-                            .object(objectName)
-                            .stream(uploadStream, fileBytes.length,
-                                    Math.min(fileBytes.length, 10 * 1024 * 1024))
-                            .contentType(contentType)
-                            .userMetadata(userMetadata)
-                            .build()
-            );
-
-            createContentHashMarker(bucketName, hash, objectName);
-            return response;
         } catch (Exception e) {
             throw new MinioOperationException("Upload with instant upload failed: " + objectName, e);
+        } finally {
+            deleteQuietly(content);
         }
     }
 
     @Override
     public ObjectWriteResponse uploadWithHash(String bucketName, String objectName,
                                               InputStream stream, String contentType) {
+        SpooledContent content = null;
         try {
-            byte[] fileBytes = toByteArray(stream);
-            String hash = MinioHashUtil.computeMD5(fileBytes);
+            content = spoolWithMD5(stream);
 
             Map<String, String> userMetadata = new HashMap<>();
-            userMetadata.put("content-hash", hash);
+            userMetadata.put("content-hash", content.hash);
 
-            return minioClient.putObject(
-                    PutObjectArgs.builder()
-                            .bucket(bucketName)
-                            .object(objectName)
-                            .stream(new ByteArrayInputStream(fileBytes), fileBytes.length,
-                                    Math.min(fileBytes.length, 10 * 1024 * 1024))
-                            .contentType(contentType)
-                            .userMetadata(userMetadata)
-                            .build()
-            );
+            long size = Files.size(content.path);
+            try (InputStream fileStream = Files.newInputStream(content.path)) {
+                PutObjectArgs.Builder builder = PutObjectArgs.builder()
+                        .bucket(bucketName)
+                        .object(objectName)
+                        .stream(fileStream, size, -1)
+                        .userMetadata(userMetadata);
+                if (contentType != null && !contentType.isEmpty()) {
+                    builder.contentType(contentType);
+                }
+                return minioClient.putObject(builder.build());
+            }
         } catch (Exception e) {
             throw new MinioOperationException("Upload with hash failed: " + objectName, e);
+        } finally {
+            deleteQuietly(content);
         }
     }
 
     // ===================== Helper Methods =====================
 
     /**
-     * 将输入流完整读取为字节数组。
+     * 将输入流写入临时文件，同时计算 MD5，避免大文件全量驻留内存。
      */
-    private byte[] toByteArray(InputStream stream) throws IOException {
-        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-        byte[] data = new byte[8192];
-        int n;
-        while ((n = stream.read(data, 0, data.length)) != -1) {
-            buffer.write(data, 0, n);
+    private SpooledContent spoolWithMD5(InputStream stream) throws IOException {
+        Path tempFile = Files.createTempFile("minio-upload-", ".tmp");
+        MessageDigest digest;
+        try {
+            digest = MessageDigest.getInstance("MD5");
+        } catch (NoSuchAlgorithmException e) {
+            Files.deleteIfExists(tempFile);
+            throw new IOException("MD5 algorithm not available", e);
         }
-        return buffer.toByteArray();
+
+        try (DigestOutputStream out = new DigestOutputStream(
+                Files.newOutputStream(tempFile), digest)) {
+            byte[] buffer = new byte[8192];
+            int n;
+            while ((n = stream.read(buffer)) != -1) {
+                out.write(buffer, 0, n);
+            }
+        } catch (IOException e) {
+            Files.deleteIfExists(tempFile);
+            throw e;
+        }
+
+        return new SpooledContent(tempFile, MinioHashUtil.toHex(digest.digest()));
+    }
+
+    /**
+     * 删除临时文件，失败时仅记录日志。
+     */
+    private void deleteQuietly(SpooledContent content) {
+        if (content == null) {
+            return;
+        }
+        try {
+            Files.deleteIfExists(content.path);
+        } catch (IOException e) {
+            logger.warn("Failed to delete temporary upload file: {}", content.path, e);
+        }
+    }
+
+    /**
+     * 校验分片大小与分片数量是否符合 S3 约束。
+     */
+    private void validatePartSize(long objectSize, int partSize) {
+        if (partSize < MIN_PART_SIZE) {
+            throw new IllegalArgumentException("partSize must be at least 5MiB");
+        }
+        long partCount = (long) Math.ceil((double) objectSize / partSize);
+        if (partCount > MAX_PART_COUNT) {
+            throw new IllegalArgumentException("partCount " + partCount
+                    + " exceeds the maximum of " + MAX_PART_COUNT);
+        }
+    }
+
+    /**
+     * 校验已有分片是否与本次续传的分片大小一致，避免合并出损坏对象。
+     */
+    private void validateExistingParts(List<Part> existingParts, long objectSize,
+                                       int partSize, int partCount) {
+        for (Part part : existingParts) {
+            if (part.partNumber() > partCount) {
+                throw new MinioOperationException("Existing part " + part.partNumber()
+                        + " is out of range for partCount " + partCount,
+                        new IllegalStateException("Inconsistent multipart upload"));
+            }
+            long existingSize = part.partSize();
+            if (existingSize <= 0) {
+                continue;
+            }
+            long expected = part.partNumber() < partCount
+                    ? partSize
+                    : objectSize - (long) (partCount - 1) * partSize;
+            if (existingSize != expected) {
+                throw new MinioOperationException("Existing part " + part.partNumber()
+                        + " has size " + existingSize + " but " + expected
+                        + " is required; refuse to resume with a different part size",
+                        new IllegalStateException("Inconsistent part size"));
+            }
+        }
+    }
+
+    /**
+     * 跳过指定长度的字节；底层不支持 skip 时退化为逐字节读取。
+     */
+    private void skipFully(InputStream in, long length) throws IOException {
+        long remaining = length;
+        while (remaining > 0) {
+            long skipped = in.skip(remaining);
+            if (skipped > 0) {
+                remaining -= skipped;
+                continue;
+            }
+            if (in.read() == -1) {
+                throw new IOException("Unexpected end of stream while skipping " + length + " bytes");
+            }
+            remaining--;
+        }
     }
 
     /**
@@ -680,6 +839,22 @@ public class DefaultMinioTemplate implements MinioTemplate {
         byte[] copy = new byte[length];
         System.arraycopy(original, 0, copy, 0, length);
         return copy;
+    }
+
+    /**
+     * 临时文件与内容哈希的持有对象。
+     */
+    private static class SpooledContent {
+
+        private final Path path;
+
+        private final String hash;
+
+        private SpooledContent(Path path, String hash) {
+            this.path = path;
+            this.hash = hash;
+        }
+
     }
 
     /**

@@ -12,7 +12,9 @@ import java.time.format.DateTimeFormatter;
  * <p>参考 AWS Signature V4 文档实现。</p>
  *
  * @author along
+ * @deprecated 分片上传已改用 MinIO SDK 原生签名，该类不再被引用，将在后续版本移除。
  */
+@Deprecated
 public class S3Signer {
 
     private static final String ALGORITHM = "AWS4-HMAC-SHA256";

@@ -102,7 +102,9 @@ public class MinioAutoConfiguration {
     public MinioTemplate minioTemplate(MinioClient minioClient, MinioProperties props,
                                        MinioBucketManager bucketManager,
                                        S3MultipartClient multipartClient) {
-        bucketManager.createIfAbsent(props.getBucket());
+        if (props.isCreateBucketOnStartup()) {
+            bucketManager.createIfAbsent(props.getBucket());
+        }
         return new DefaultMinioTemplate(minioClient, props, multipartClient);
     }
 

@@ -28,6 +28,9 @@ public class MinioProperties {
     /** 默认存储桶名称 */
     private String bucket = "default";
 
+    /** 是否在启动时检查并创建默认 Bucket */
+    private boolean createBucketOnStartup = true;
+
     /** 是否启用 SSL/TLS */
     private boolean secure = false;
 

@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "PowerShell(Test-Path *)",
-      "PowerShell(javap *)"
-    ]
-  }
-}
